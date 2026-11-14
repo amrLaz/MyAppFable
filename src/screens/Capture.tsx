@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { type Quad, blobToCanvas, detectQuad, makeCanvas } from '../lib/imaging';
+import { type Quad, blobToCanvas, detectQuad, makeCanvas, sharpness } from '../lib/imaging';
 import { useFit } from '../lib/useFit';
 
 interface Props {
@@ -30,6 +30,8 @@ export function Capture({ count, onShot, onClose, onDone }: Props) {
       .then((s) => {
         if (stopped) { s.getTracks().forEach((t) => t.stop()); return; }
         stream = s;
+        // Mise au point continue quand l'appareil le permet (ignoré sinon).
+        s.getVideoTracks()[0]?.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {});
         const v = videoRef.current!;
         v.srcObject = s;
         v.onloadedmetadata = () => {
@@ -55,12 +57,33 @@ export function Capture({ count, onShot, onClose, onDone }: Props) {
     return () => clearInterval(t);
   }, [status]);
 
-  const shoot = () => {
+  const shoot = async () => {
     const v = videoRef.current;
-    if (!v || !v.videoWidth) return;
-    const c = makeCanvas(v.videoWidth, v.videoHeight);
-    c.getContext('2d', { willReadFrequently: true })!.drawImage(v, 0, 0);
-    onShot(c);
+    if (!v || !v.videoWidth || busy) return;
+    setBusy(true);
+    // 1. Vraie photo du capteur, bien plus détaillée qu'une image de la vidéo (Android).
+    const track = (v.srcObject as MediaStream | null)?.getVideoTracks()[0];
+    const ImageCaptureCtor = (window as unknown as { ImageCapture?: new (t: MediaStreamTrack) => { takePhoto(): Promise<Blob> } }).ImageCapture;
+    if (track && ImageCaptureCtor) {
+      try {
+        const blob = await Promise.race([
+          new ImageCaptureCtor(track).takePhoto(),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('délai dépassé')), 4000)),
+        ]);
+        const photo = await blobToCanvas(blob);
+        if (photo.width * photo.height >= v.videoWidth * v.videoHeight) return onShot(photo);
+      } catch { /* on se rabat sur la vidéo */ }
+    }
+    // 2. Sinon : quatre vues de la vidéo, on garde la plus nette (limite le flou de bougé).
+    let best: HTMLCanvasElement | null = null, bestScore = -1;
+    for (let i = 0; i < 4; i++) {
+      const frame = makeCanvas(v.videoWidth, v.videoHeight);
+      frame.getContext('2d', { willReadFrequently: true })!.drawImage(v, 0, 0);
+      const score = sharpness(frame, frame.width, frame.height);
+      if (score > bestScore) { bestScore = score; best = frame; }
+      await new Promise((r) => setTimeout(r, 90));
+    }
+    onShot(best!);
   };
 
   const onFile = async (file: File | undefined) => {
@@ -93,7 +116,7 @@ export function Capture({ count, onShot, onClose, onDone }: Props) {
           )}
         </div>
         {status === 'live' && (
-          <span className={'pill' + (quad ? ' ok' : '')}>{quad ? 'Document détecté' : 'Placez la feuille sur un fond sombre'}</span>
+          <span className={'pill' + (quad ? ' ok' : '')}>{busy ? 'Ne bougez plus…' : quad ? 'Document détecté' : 'Placez la feuille sur un fond sombre'}</span>
         )}
         {status === 'starting' && <p className="hint center">Ouverture de la caméra…</p>}
         {status === 'unavailable' && (
@@ -108,7 +131,7 @@ export function Capture({ count, onShot, onClose, onDone }: Props) {
       </div>
       <footer className="shoot">
         <button className="side" onClick={() => fileRef.current?.click()} disabled={busy}>Importer</button>
-        <button className="shutter" onClick={shoot} disabled={status !== 'live'} aria-label="Prendre la photo" />
+        <button className="shutter" onClick={shoot} disabled={status !== 'live' || busy} aria-label="Prendre la photo" />
         {onDone ? <button className="side strong" onClick={onDone}>Terminer ({count})</button> : <span className="side" />}
       </footer>
       <input id="file-input" ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onFile(e.target.files?.[0])} />

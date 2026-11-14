@@ -21,7 +21,18 @@ export function Enhance({ warped, pageNumber, onBack, onAccept }: Props) {
   const [filter, setFilter] = useState<Filter>('auto');
   const [busy, setBusy] = useState(false);
   const viewRef = useRef<HTMLCanvasElement>(null);
-  const result = useMemo(() => applyFilter(warped, filter), [warped, filter]);
+  const [result, setResult] = useState<HTMLCanvasElement | null>(null);
+  const [working, setWorking] = useState(true);
+
+  // Le filtre est calculé en pleine résolution, après affichage de l'indicateur.
+  useEffect(() => {
+    setWorking(true);
+    const t = setTimeout(() => {
+      setResult(applyFilter(warped, filter));
+      setWorking(false);
+    }, 30);
+    return () => clearTimeout(t);
+  }, [warped, filter]);
 
   const thumbs = useMemo(() => {
     const small = scaledCopy(warped, 150);
@@ -29,6 +40,7 @@ export function Enhance({ warped, pageNumber, onBack, onAccept }: Props) {
   }, [warped]);
 
   useEffect(() => {
+    if (!result) return;
     const c = viewRef.current!;
     c.width = result.width;
     c.height = result.height;
@@ -36,8 +48,9 @@ export function Enhance({ warped, pageNumber, onBack, onAccept }: Props) {
   }, [result]);
 
   const accept = async (more: boolean) => {
+    if (!result) return;
     setBusy(true);
-    const blob = await canvasToBlob(result, 0.9);
+    const blob = await canvasToBlob(result, 0.92);
     onAccept({ blob, w: result.width, h: result.height }, result, more);
   };
 
@@ -49,6 +62,7 @@ export function Enhance({ warped, pageNumber, onBack, onAccept }: Props) {
       </header>
       <div className="stage light">
         <canvas ref={viewRef} className="result" />
+        {working && <span className="pill">Amélioration…</span>}
       </div>
       <div className="filters" role="radiogroup" aria-label="Filtre">
         {FILTERS.map((f) => (
@@ -59,8 +73,8 @@ export function Enhance({ warped, pageNumber, onBack, onAccept }: Props) {
         ))}
       </div>
       <footer className="tools">
-        <button className="btn ghost" disabled={busy} onClick={() => accept(true)}>+ Page suivante</button>
-        <button className="btn" disabled={busy} onClick={() => accept(false)}>Terminer</button>
+        <button className="btn ghost" disabled={busy || working} onClick={() => accept(true)}>+ Page suivante</button>
+        <button className="btn" disabled={busy || working} onClick={() => accept(false)}>Terminer</button>
       </footer>
     </div>
   );

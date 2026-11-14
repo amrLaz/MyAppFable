@@ -4,9 +4,9 @@ import { blobToCanvas } from './imaging';
 
 export type Quality = 'light' | 'standard' | 'max';
 const QUALITY: Record<Quality, { side: number; q: number }> = {
-  light: { side: 1200, q: 0.5 },
-  standard: { side: 1700, q: 0.72 },
-  max: { side: 2400, q: 0.9 },
+  light: { side: 1300, q: 0.55 },
+  standard: { side: 2000, q: 0.8 },
+  max: { side: 3000, q: 0.92 },
 };
 
 export async function pageJpeg(page: PageRec, quality: Quality): Promise<{ dataUrl: string; w: number; h: number }> {

@@ -19,7 +19,7 @@ function ctx2d(c: HTMLCanvasElement): CanvasRenderingContext2D {
   return c.getContext('2d', { willReadFrequently: true })!;
 }
 
-export async function blobToCanvas(blob: Blob, maxSide = 3000): Promise<HTMLCanvasElement> {
+export async function blobToCanvas(blob: Blob, maxSide = 4000): Promise<HTMLCanvasElement> {
   const bmp = await createImageBitmap(blob);
   const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const c = makeCanvas(bmp.width * s, bmp.height * s);
@@ -419,8 +419,96 @@ function solve(A: number[][], b: number[]): number[] {
   return x;
 }
 
-/** Redresse le quadrilatère en rectangle (homographie + échantillonnage bilinéaire). */
-export function warp(src: HTMLCanvasElement, quad: Quad, maxSide = 2400): HTMLCanvasElement {
+/**
+ * Mesure la courbure réelle de chaque bord de la feuille (papier bombé, plié, corné).
+ * Pour chaque côté, on relève l'écart entre la corde tendue entre les deux coins et
+ * le vrai bord, en plusieurs points. Renvoie ces écarts, en pixels de la source,
+ * avec la direction (normale extérieure) dans laquelle ils s'appliquent.
+ */
+function edgeCurves(src: HTMLCanvasElement, p: Pt[]) {
+  const N = 64;
+  const { g: raw, w, h } = grayAt(src, src.width, src.height, 1000);
+  const g = box3(raw, w, h);
+  const k = w / src.width;
+  const cx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4, cy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4;
+  const reach = Math.round(Math.max(w, h) * 0.035);
+  const at = (x: number, y: number) => {
+    const xi = x < 0 ? 0 : x > w - 1 ? w - 1 : Math.round(x);
+    const yi = y < 0 ? 0 : y > h - 1 ? h - 1 : Math.round(y);
+    return g[yi * w + xi];
+  };
+  // Côtés dans l'ordre : haut (0→1), droite (1→2), bas (3→2), gauche (0→3).
+  const sides: [number, number][] = [[0, 1], [1, 2], [3, 2], [0, 3]];
+  return sides.map(([ia, ib]) => {
+    const a = p[ia], b = p[ib];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    let nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len;
+    if (nx * ((a.x + b.x) / 2 - cx) + ny * ((a.y + b.y) / 2 - cy) < 0) { nx = -nx; ny = -ny; }
+    const dev = new Float32Array(N + 1);
+    const ok = new Uint8Array(N + 1);
+    let found = 0;
+    for (let s = 2; s <= N - 2; s++) {
+      const t = s / N;
+      const px = (a.x + (b.x - a.x) * t) * k, py = (a.y + (b.y - a.y) * t) * k;
+      let best = 9, bestD = NaN;
+      for (let dd = -reach; dd <= reach; dd++) {
+        const inside = at(px + nx * (dd - 2), py + ny * (dd - 2)) + at(px + nx * (dd - 3), py + ny * (dd - 3));
+        const outside = at(px + nx * (dd + 2), py + ny * (dd + 2)) + at(px + nx * (dd + 3), py + ny * (dd + 3));
+        // À contraste égal, on préfère le bord le plus proche de la corde.
+        const grad = (inside - outside) / 2 - Math.abs(dd) * 0.15;
+        if (grad > best) { best = grad; bestD = dd; }
+      }
+      if (!Number.isNaN(bestD)) { dev[s] = bestD; ok[s] = 1; found++; }
+    }
+    const flat = { nx, ny, dev: new Float32Array(N + 1) };
+    if (found < N * 0.6) return flat;
+    // Aux deux bouts, on prolonge la première et la dernière mesure : un coin posé un peu
+    // à côté (bord courbe) est ainsi ramené sur la feuille. Les trous sont interpolés.
+    let first = 2, lastOk = N - 2;
+    while (!ok[first]) first++;
+    while (!ok[lastOk]) lastOk--;
+    ok[0] = ok[N] = 1; dev[0] = dev[first]; dev[N] = dev[lastOk];
+    for (let s = 1, last = 0; s <= N; s++) {
+      if (!ok[s]) continue;
+      for (let m = last + 1; m < s; m++) dev[m] = dev[last] + ((dev[s] - dev[last]) * (m - last)) / (s - last);
+      last = s;
+    }
+    // Médiane glissante (écarte les faux bords isolés) puis lissage.
+    const med = new Float32Array(N + 1);
+    for (let s = 0; s <= N; s++) {
+      const win: number[] = [];
+      for (let m = -3; m <= 3; m++) win.push(dev[Math.min(N, Math.max(0, s + m))]);
+      med[s] = win.sort((x, y) => x - y)[3];
+    }
+    let max = 0;
+    for (let s = 0; s <= N; s++) {
+      let sum = 0;
+      for (let m = -2; m <= 2; m++) sum += med[Math.min(N, Math.max(0, s + m))];
+      flat.dev[s] = sum / 5 / k;
+      max = Math.max(max, Math.abs(flat.dev[s] * k));
+    }
+    if (max < 1.5) flat.dev.fill(0); // bord droit : pas de correction
+    return flat;
+  });
+}
+
+function resample(dev: Float32Array, len: number): Float32Array {
+  const out = new Float32Array(len);
+  const N = dev.length - 1;
+  for (let i = 0; i < len; i++) {
+    const f = (i / Math.max(1, len - 1)) * N;
+    const i0 = Math.min(N - 1, f | 0);
+    out[i] = dev[i0] + (dev[i0 + 1] - dev[i0]) * (f - i0);
+  }
+  return out;
+}
+
+
+/**
+ * Redresse et aplatit la feuille : homographie pour la perspective, plus une
+ * correction qui suit la courbure mesurée des quatre bords (papier bombé ou plié).
+ */
+export function warp(src: HTMLCanvasElement, quad: Quad, maxSide = 3000): HTMLCanvasElement {
   const p = quad.map((q) => ({ x: q.x * (src.width - 1), y: q.y * (src.height - 1) }));
   const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
   let W = Math.max(dist(p[0], p[1]), dist(p[3], p[2]));
@@ -428,6 +516,10 @@ export function warp(src: HTMLCanvasElement, quad: Quad, maxSide = 2400): HTMLCa
   const k = Math.min(1, maxSide / Math.max(W, H));
   W = Math.max(2, Math.round(W * k));
   H = Math.max(2, Math.round(H * k));
+  // Feuille proche du format A4 : on rétablit ses proportions exactes (1 : 1,414).
+  const A4 = Math.SQRT2;
+  if (Math.abs(H / W / A4 - 1) < 0.05) H = Math.round(W * A4);
+  else if (Math.abs(W / H / A4 - 1) < 0.05) W = Math.round(H * A4);
 
   const dst: Pt[] = [{ x: 0, y: 0 }, { x: W - 1, y: 0 }, { x: W - 1, y: H - 1 }, { x: 0, y: H - 1 }];
   const A: number[][] = [];
@@ -439,6 +531,10 @@ export function warp(src: HTMLCanvasElement, quad: Quad, maxSide = 2400): HTMLCa
     A.push([0, 0, 0, u, v, 1, -u * y, -v * y]); B.push(y);
   }
   const [a, b, c, d, e, f, g, h] = solve(A, B);
+
+  const [cT, cR, cB, cL] = edgeCurves(src, p);
+  const dT = resample(cT.dev, W), dB = resample(cB.dev, W), dL = resample(cL.dev, H), dR = resample(cR.dev, H);
+  const curved = [cT, cR, cB, cL].some((c) => c.dev.some((v) => v !== 0));
 
   const sw = src.width, sh = src.height;
   const sd = ctx2d(src).getImageData(0, 0, sw, sh).data;
@@ -452,6 +548,12 @@ export function warp(src: HTMLCanvasElement, quad: Quad, maxSide = 2400): HTMLCa
       const den = g * u + h * v + 1;
       let x = (a * u + b * v + c) / den;
       let y = (d * u + e * v + f) / den;
+      if (curved) {
+        const un = u / (W - 1), vn = v / (H - 1);
+        const oT = (1 - vn) * dT[u], oB = vn * dB[u], oL = (1 - un) * dL[v], oR = un * dR[v];
+        x += oT * cT.nx + oB * cB.nx + oL * cL.nx + oR * cR.nx;
+        y += oT * cT.ny + oB * cB.ny + oL * cL.ny + oR * cR.ny;
+      }
       if (x < 0) x = 0; else if (x > sw - 1.001) x = sw - 1.001;
       if (y < 0) y = 0; else if (y > sh - 1.001) y = sh - 1.001;
       const x0 = x | 0, y0 = y | 0;
@@ -474,20 +576,27 @@ function backgroundGrid(d: Uint8ClampedArray, w: number, h: number) {
   const bs = Math.max(8, Math.round(Math.max(w, h) / 48));
   const gw = Math.ceil(w / bs), gh = Math.ceil(h / bs);
   let grid = new Float32Array(gw * gh * 3);
+  const hist = new Uint32Array(256 * 3);
   for (let gy = 0; gy < gh; gy++) {
     for (let gx = 0; gx < gw; gx++) {
-      let r = 0, g = 0, b = 0;
+      hist.fill(0);
+      let cnt = 0;
       const y1 = Math.min(h, (gy + 1) * bs), x1 = Math.min(w, (gx + 1) * bs);
       for (let y = gy * bs; y < y1; y += 2) {
         for (let x = gx * bs; x < x1; x += 2) {
           const i = (y * w + x) * 4;
-          if (d[i] > r) r = d[i];
-          if (d[i + 1] > g) g = d[i + 1];
-          if (d[i + 2] > b) b = d[i + 2];
+          hist[d[i]]++; hist[256 + d[i + 1]]++; hist[512 + d[i + 2]]++;
+          cnt++;
         }
       }
+      // 90e centile : le papier sans le texte, et sans se laisser tromper par le bruit comme un maximum.
       const o = (gy * gw + gx) * 3;
-      grid[o] = r; grid[o + 1] = g; grid[o + 2] = b;
+      const target = cnt * 0.1;
+      for (let ch = 0; ch < 3; ch++) {
+        let acc = 0, v = 255;
+        for (; v > 0; v--) { acc += hist[ch * 256 + v]; if (acc >= target) break; }
+        grid[o + ch] = v;
+      }
     }
   }
   // Une passe de maximum (efface les gros blocs sombres), puis deux passes de flou.
@@ -518,17 +627,55 @@ function backgroundGrid(d: Uint8ClampedArray, w: number, h: number) {
   return { grid, gw, gh, bs };
 }
 
-function lut(fn: (v: number) => number): Uint8ClampedArray {
+/** Flou moyen de rayon r (deux passes à somme glissante). */
+function boxBlur(src: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  const tmp = new Uint8Array(src.length), out = new Uint8Array(src.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0, cnt = 0;
+    for (let x = 0; x <= Math.min(r, w - 1); x++) { sum += src[row + x]; cnt++; }
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / cnt;
+      const add = x + r + 1, rem = x - r;
+      if (add < w) { sum += src[row + add]; cnt++; }
+      if (rem >= 0) { sum -= src[row + rem]; cnt--; }
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0, cnt = 0;
+    for (let y = 0; y <= Math.min(r, h - 1); y++) { sum += tmp[y * w + x]; cnt++; }
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / cnt;
+      const add = y + r + 1, rem = y - r;
+      if (add < h) { sum += tmp[add * w + x]; cnt++; }
+      if (rem >= 0) { sum -= tmp[rem * w + x]; cnt--; }
+    }
+  }
+  return out;
+}
+
+function lut(lo: number, hi: number, gamma = 1): Uint8ClampedArray {
   const t = new Uint8ClampedArray(256);
-  for (let i = 0; i < 256; i++) t[i] = Math.round(fn(i / 255) * 255);
+  for (let i = 0; i < 256; i++) {
+    const v = Math.min(1, Math.max(0, (i / 255 - lo) / (hi - lo)));
+    t[i] = Math.round(Math.pow(v, gamma) * 255);
+  }
   return t;
 }
 
-const LUT_AUTO = lut((v) => Math.pow(Math.min(1, v * 1.05), 1.35));
-const LUT_BW = lut((v) => Math.min(1, Math.max(0, (v - 0.5) / 0.32)));
-const LUT_GRAY = lut((v) => Math.pow(Math.min(1, v * 1.03), 1.15));
+// Point noir, point blanc : en dessous le trait devient noir, au-dessus le papier devient blanc.
+const LUT_AUTO = lut(0.25, 0.88, 1.1);
+const LUT_GRAY = lut(0.15, 0.92);
+const LUT_BW = lut(0.52, 0.74);
 
-/** Applique un filtre et renvoie un nouveau canevas. */
+/**
+ * Applique un filtre et renvoie un nouveau canevas.
+ * Auto, Gris et Noir et blanc suivent les mêmes étapes :
+ * 1. division par la couleur locale du papier (supprime ombres et dominante),
+ * 2. réduction du bruit si la photo en contient,
+ * 3. renforcement des traits (différence entre l'image et sa version floutée),
+ * 4. courbe de contraste : papier blanc, encre foncée.
+ */
 export function applyFilter(src: HTMLCanvasElement, filter: Filter): HTMLCanvasElement {
   const w = src.width, h = src.height;
   const out = makeCanvas(w, h);
@@ -546,6 +693,9 @@ export function applyFilter(src: HTMLCanvasElement, filter: Filter): HTMLCanvasE
     return out;
   }
 
+  // 1. Normalisation par le fond, écrite sur place ; L reçoit la luminance.
+  const n = w * h;
+  const L = new Uint8Array(n);
   const { grid, gw, gh, bs } = backgroundGrid(d, w, h);
   const half = bs / 2;
   for (let y = 0; y < h; y++) {
@@ -558,21 +708,58 @@ export function applyFilter(src: HTMLCanvasElement, filter: Filter): HTMLCanvasE
       const x0 = Math.min(gw - 1, fx | 0), x1 = Math.min(gw - 1, x0 + 1), tx = fx - x0;
       const a = (y0 * gw + x0) * 3, b = (y0 * gw + x1) * 3, c = (y1 * gw + x0) * 3, e = (y1 * gw + x1) * 3;
       const i = (y * w + x) * 4;
-      let nr = 0, ng = 0, nb = 0;
       for (let ch = 0; ch < 3; ch++) {
         const bg = (grid[a + ch] * (1 - tx) + grid[b + ch] * tx) * (1 - ty) + (grid[c + ch] * (1 - tx) + grid[e + ch] * tx) * ty;
-        const v = Math.min(255, (d[i + ch] * 255) / Math.max(bg, 48));
-        if (ch === 0) nr = v; else if (ch === 1) ng = v; else nb = v;
+        d[i + ch] = (d[i + ch] * 255) / Math.max(bg, 40);
       }
-      if (filter === 'auto') {
-        d[i] = LUT_AUTO[nr | 0]; d[i + 1] = LUT_AUTO[ng | 0]; d[i + 2] = LUT_AUTO[nb | 0];
-      } else {
-        const l = (nr * 77 + ng * 150 + nb * 29) >> 8;
-        const v = filter === 'bw' ? LUT_BW[l] : LUT_GRAY[l];
-        d[i] = v; d[i + 1] = v; d[i + 2] = v;
+      L[y * w + x] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    }
+  }
+
+  // 2. Bruit : écart médian entre l'image et sa version lissée. Une photo propre n'est pas lissée.
+  const smooth = box3(L, w, h);
+  const diffHist = new Uint32Array(256);
+  let samples = 0;
+  for (let i = 0; i < n; i += 7) { diffHist[Math.abs(L[i] - smooth[i])]++; samples++; }
+  let med = 0;
+  for (let acc = 0; med < 255; med++) { acc += diffHist[med]; if (acc >= samples / 2) break; }
+  const k = Math.min(1, Math.max(0, (med - 1.5) / 3));
+  const base = smooth;
+  if (k < 1) for (let i = 0; i < n; i++) base[i] = L[i] * (1 - k) + smooth[i] * k;
+
+  // 3 et 4. Renforcement des traits puis courbe de contraste.
+  const wide = boxBlur(base, w, h, Math.max(2, Math.round(Math.max(w, h) / 600)));
+  const amount = filter === 'bw' ? 1.2 : 0.9;
+  const curve = filter === 'auto' ? LUT_AUTO : filter === 'bw' ? LUT_BW : LUT_GRAY;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    let v = base[p] + amount * (base[p] - wide[p]);
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    const lp = curve[v | 0];
+    if (filter === 'auto') {
+      // La couleur (tampon, signature, surlignage) est conservée ; les faibles écarts, dus au bruit, sont neutralisés.
+      for (let ch = 0; ch < 3; ch++) {
+        let cdiff = d[i + ch] - L[p];
+        cdiff = cdiff > 8 ? cdiff - 8 : cdiff < -8 ? cdiff + 8 : 0;
+        d[i + ch] = lp + cdiff * 1.15;
       }
+    } else {
+      d[i] = d[i + 1] = d[i + 2] = lp;
     }
   }
   octx.putImageData(img, 0, 0);
   return out;
+}
+
+/** Mesure de netteté d'une image (énergie des contours) : sert à garder la vue la plus nette. */
+export function sharpness(source: CanvasImageSource, sw: number, sh: number): number {
+  const { g, w, h } = grayAt(source, sw, sh, 480);
+  let sum = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w];
+      sum += lap * lap;
+    }
+  }
+  return sum / (w * h);
 }
