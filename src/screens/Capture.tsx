@@ -50,7 +50,7 @@ export function Capture({ count, onShot, onClose, onDone }: Props) {
     if (status !== 'live') return;
     const t = setInterval(() => {
       const v = videoRef.current;
-      if (v && v.videoWidth) setQuad(detectQuad(v, v.videoWidth, v.videoHeight));
+      if (v && v.videoWidth) setQuad(detectQuad(v, v.videoWidth, v.videoHeight, false));
     }, 350);
     return () => clearInterval(t);
   }, [status]);

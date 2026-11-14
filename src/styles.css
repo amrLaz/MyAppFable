@@ -121,3 +121,8 @@ main.scroll:has(.empty) { display: flex; padding-bottom: 18px; }
 .progress div { height: 6px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
 .progress i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 @media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
+.loupe { position: absolute; top: 10px; left: 10px; width: 120px; height: 120px; border-radius: 50%; border: 3px solid #fff; background-color: var(--cam); background-repeat: no-repeat; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); pointer-events: none; }
+.loupe.right { left: auto; right: 10px; }
+.loupe::before, .loupe::after { content: ""; position: absolute; background: #43cdc3; }
+.loupe::before { left: 50%; top: 38%; width: 2px; height: 24%; margin-left: -1px; }
+.loupe::after { top: 50%; left: 38%; height: 2px; width: 24%; margin-top: -1px; }

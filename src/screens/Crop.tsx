@@ -17,6 +17,7 @@ export function Crop({ src: initial, pageNumber, onRetake, onNext }: Props) {
   const [found, setFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const drag = useRef<number | null>(null);
+  const [active, setActive] = useState<number | null>(null);
   const { ref, box } = useFit(src.width / src.height);
   const preview = useMemo(() => scaledCopy(src, 1400).toDataURL('image/jpeg', 0.85), [src]);
 
@@ -51,8 +52,8 @@ export function Crop({ src: initial, pageNumber, onRetake, onNext }: Props) {
             height={box.h}
             className="cropper"
             onPointerMove={move}
-            onPointerUp={() => (drag.current = null)}
-            onPointerCancel={() => (drag.current = null)}
+            onPointerUp={() => { drag.current = null; setActive(null); }}
+            onPointerCancel={() => { drag.current = null; setActive(null); }}
           >
             <polygon points={pts} className="quad" />
             {quad.map((p, i) => (
@@ -66,6 +67,7 @@ export function Crop({ src: initial, pageNumber, onRetake, onNext }: Props) {
                   data-corner={i}
                   onPointerDown={(e) => {
                     drag.current = i;
+                    setActive(i);
                     (e.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(e.pointerId);
                   }}
                 />
@@ -73,6 +75,18 @@ export function Crop({ src: initial, pageNumber, onRetake, onNext }: Props) {
             ))}
           </svg>
         </div>
+        {active !== null && (
+          // Loupe : vue agrandie trois fois autour du coin déplacé, placée du côté opposé au doigt.
+          <div
+            className={'loupe' + (quad[active].x < 0.5 && quad[active].y < 0.5 ? ' right' : '')}
+            style={{
+              backgroundImage: `url(${preview})`,
+              backgroundSize: `${box.w * 3}px ${box.h * 3}px`,
+              backgroundPosition: `${60 - quad[active].x * box.w * 3}px ${60 - quad[active].y * box.h * 3}px`,
+            }}
+            aria-hidden="true"
+          />
+        )}
       </div>
       <footer className="tools">
         <button className="side" onClick={() => setSrc(rotate90(src))}>Pivoter</button>
