@@ -1,0 +1,586 @@
+<title>Projet Feuillet</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : dossier d'étude. Sommaire collant à gauche, sections lettrées de A à O, la maquette ouvre le dossier. */
+:root{
+  --bg:#edf0f3; --surface:#ffffff; --sunk:#e2e7ec; --ink:#14202b; --muted:#566472; --rule:#cfd7de;
+  --accent:#0a726d; --accent-soft:#d5ecea; --on-accent:#ffffff; --hl:#ffd84d; --hl-ink:#3a2f00;
+  --ok:#1f7a45; --warn:#9a5b00; --bad:#b03434;
+  --paper:#fbfcfd; --paper-line:#b9c3cc; --cam:#1a2229; --cam-ink:#eef3f6; --bezel:#0d141a;
+  --app-bg:#f4f6f8; --app-surface:#ffffff; --app-ink:#14202b; --app-muted:#6a7783; --app-rule:#dde3e8;
+  --display:"Bricolage Grotesque","Arial Narrow",Arial,sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0e151b; --surface:#16202a; --sunk:#1c2833; --ink:#e5ebf0; --muted:#94a2ae; --rule:#2a3845;
+  --accent:#43cdc3; --accent-soft:#12383a; --on-accent:#04201f; --hl:#e6bd35; --hl-ink:#2b2300;
+  --ok:#5fce8c; --warn:#e5a94a; --bad:#f08080;
+  --paper:#dfe5ea; --paper-line:#8f9ba6; --cam:#0a0f13; --cam-ink:#eef3f6; --bezel:#000000;
+  --app-bg:#111a22; --app-surface:#1a2530; --app-ink:#e5ebf0; --app-muted:#8f9daa; --app-rule:#27343f;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0e151b; --surface:#16202a; --sunk:#1c2833; --ink:#e5ebf0; --muted:#94a2ae; --rule:#2a3845;
+  --accent:#43cdc3; --accent-soft:#12383a; --on-accent:#04201f; --hl:#e6bd35; --hl-ink:#2b2300;
+  --ok:#5fce8c; --warn:#e5a94a; --bad:#f08080;
+  --paper:#dfe5ea; --paper-line:#8f9ba6; --cam:#0a0f13; --cam-ink:#eef3f6; --bezel:#000000;
+  --app-bg:#111a22; --app-surface:#1a2530; --app-ink:#e5ebf0; --app-muted:#8f9daa; --app-rule:#27343f;
+  color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6}
+.wrap{max-width:1160px;margin:0 auto;padding-block:40px 80px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:grid;grid-template-columns:200px minmax(0,1fr);gap:56px}
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 24px);align-self:start;font-size:13.5px}
+nav.toc p{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+nav.toc a{display:flex;gap:10px;padding:4px 0;color:var(--muted);text-decoration:none}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent)}
+nav.toc a b{font-family:var(--mono);font-weight:500;color:var(--accent);width:12px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+main{min-width:0;display:flex;flex-direction:column;gap:72px}
+
+/* En-tête : le titre est cadré par les quatre poignées de recadrage */
+header.top{display:flex;flex-direction:column;gap:20px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0}
+.crop{position:relative;align-self:flex-start;padding:22px 30px;border:1.5px solid var(--accent);transform:rotate(-1.2deg);max-width:100%}
+.crop i{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2.5px solid var(--accent)}
+.crop i:nth-child(1){top:-8px;left:-8px}.crop i:nth-child(2){top:-8px;right:-8px}
+.crop i:nth-child(3){bottom:-8px;left:-8px}.crop i:nth-child(4){bottom:-8px;right:-8px}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(40px,7vw,76px);line-height:.95;letter-spacing:-.02em;margin:0;text-wrap:balance}
+h1 mark{background:var(--hl);color:var(--hl-ink);padding:0 .12em}
+.lede{font-size:19px;max-width:62ch;margin:0}
+.facts{display:flex;flex-wrap:wrap;gap:8px 28px;margin:0;padding:14px 0 0;border-top:1px solid var(--rule);font-size:14px}
+.facts div{display:flex;flex-direction:column}
+.facts dt{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.facts dd{margin:0;font-weight:500}
+
+section{display:flex;flex-direction:column;gap:20px;scroll-margin-top:24px}
+h2{font-family:var(--display);font-weight:700;font-size:clamp(26px,3.4vw,34px);line-height:1.1;letter-spacing:-.01em;margin:0;display:flex;gap:14px;align-items:baseline;text-wrap:balance}
+h2 .let{font-family:var(--mono);font-weight:500;font-size:14px;color:var(--accent);border:1.5px solid var(--accent);width:28px;height:28px;flex:none;display:grid;place-items:center;transform:translateY(-4px)}
+h3{font-family:var(--body);font-weight:600;font-size:16px;margin:0}
+p{margin:0;max-width:68ch}
+.note{font-size:14px;color:var(--muted)}
+ul.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.9em}
+
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:28px}
+.cols>div{min-width:0;display:flex;flex-direction:column;gap:8px}
+.cols ul{margin:0;padding-left:18px;font-size:15px;display:flex;flex-direction:column;gap:4px}
+.tag{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);align-self:flex-start}
+.callout{background:var(--surface);border:1px solid var(--rule);padding:20px 22px;display:flex;flex-direction:column;gap:8px}
+.callout p{max-width:72ch}
+
+.tablebox{overflow-x:auto;background:var(--surface);border:1px solid var(--rule)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:640px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--rule)}
+tr:last-child td{border-bottom:0}
+th{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--sunk)}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+th.num{text-align:right}
+tr.pick td{background:var(--accent-soft)}
+.v-ok{color:var(--ok);font-weight:600}.v-warn{color:var(--warn);font-weight:600}.v-bad{color:var(--bad);font-weight:600}
+
+/* Pipeline */
+.pipe{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.pipe li{background:var(--surface);padding:14px;display:flex;flex-direction:column;gap:4px;font-size:14px;min-width:0}
+.pipe li b{font-family:var(--mono);font-weight:500;font-size:11px;color:var(--accent)}
+.pipe li span{color:var(--muted);font-size:13px}
+
+/* Architecture */
+.arch{display:flex;flex-direction:column;gap:6px}
+.layer{display:grid;grid-template-columns:120px minmax(0,1fr);gap:14px;align-items:center;background:var(--surface);border:1px solid var(--rule);padding:12px 14px}
+.layer>b{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.layer div{display:flex;flex-wrap:wrap;gap:6px}
+.layer span{font-size:13px;padding:3px 10px;background:var(--sunk);border-radius:4px}
+.layer.opt{border-style:dashed}
+
+/* Planning */
+.gantt{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);padding:16px}
+.gantt-in{min-width:720px;display:grid;grid-template-columns:150px repeat(18,minmax(0,1fr));row-gap:8px;align-items:center;font-size:13px}
+.gantt-in .wk{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:center;border-left:1px solid var(--rule)}
+.gantt-in .lab{grid-column:1;font-weight:500}
+.gantt-in .bar{height:22px;background:var(--accent);color:var(--on-accent);font-family:var(--mono);font-size:10.5px;display:flex;align-items:center;padding:0 8px;white-space:nowrap;overflow:hidden}
+.gantt-in .bar.alt{background:var(--accent-soft);color:var(--accent)}
+
+/* Maquette : téléphones */
+.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:40px 24px;justify-items:center}
+figure{margin:0;display:flex;flex-direction:column;gap:12px;width:250px;max-width:100%}
+figcaption{font-size:13.5px;color:var(--muted);line-height:1.45}
+figcaption b{display:block;color:var(--ink);font-weight:600;font-size:14.5px}
+.phone{width:250px;max-width:100%;height:520px;border:8px solid var(--bezel);border-radius:38px;background:var(--app-bg);color:var(--app-ink);overflow:hidden;display:flex;flex-direction:column;font-size:11px;line-height:1.35;position:relative}
+.phone.dark{background:var(--cam);color:var(--cam-ink)}
+.st{display:flex;justify-content:space-between;padding:9px 20px 4px;font-family:var(--mono);font-size:9.5px;flex:none}
+.hd{display:flex;justify-content:space-between;align-items:center;padding:6px 14px 8px;flex:none}
+.hd b{font-family:var(--display);font-size:17px;font-weight:700}
+.hd small{font-size:10.5px;color:var(--accent);font-weight:600}
+.dark .hd small{color:var(--cam-ink)}
+.body{flex:1;min-height:0;padding:0 14px;display:flex;flex-direction:column;gap:9px}
+.search{background:var(--app-surface);border:1px solid var(--app-rule);border-radius:9px;padding:7px 10px;color:var(--app-muted)}
+.chips{display:flex;gap:5px;flex-wrap:nowrap;overflow:hidden}
+.chips span{padding:3px 9px;border-radius:99px;border:1px solid var(--app-rule);white-space:nowrap;background:var(--app-surface)}
+.chips span.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.doc{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--app-rule)}
+.doc div{min-width:0}
+.doc b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:11.5px}
+.doc small{color:var(--app-muted);font-family:var(--mono);font-size:9px}
+.sheet{background:repeating-linear-gradient(to bottom,transparent 0 5px,var(--paper-line) 5px 6.5px) content-box,var(--paper);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.thumb{width:34px;height:44px;flex:none;padding:6px 5px}
+.tab{flex:none;display:flex;justify-content:space-around;align-items:center;padding:8px 8px 14px;border-top:1px solid var(--app-rule);background:var(--app-surface);font-size:9px;color:var(--app-muted)}
+.tab .on{color:var(--accent);font-weight:600}
+.fab{width:46px;height:46px;border-radius:50%;background:var(--accent);margin-top:-26px;border:4px solid var(--app-bg);display:grid;place-items:center}
+.fab::before{content:"";width:16px;height:12px;border:2px solid var(--on-accent);border-radius:3px}
+.view{flex:1;min-height:0;position:relative}
+.view svg{position:absolute;inset:0;width:100%;height:100%}
+.pill{position:absolute;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--on-accent);padding:4px 12px;border-radius:99px;font-weight:600;white-space:nowrap;font-size:10.5px}
+.modes{display:flex;justify-content:center;gap:14px;padding:8px 0 4px;font-size:10px;opacity:.9;flex:none}
+.modes .on{color:var(--hl);font-weight:600}
+.shoot{display:flex;justify-content:space-between;align-items:center;padding:6px 26px 18px;flex:none}
+.shutter{width:54px;height:54px;border-radius:50%;border:3px solid var(--cam-ink);padding:4px}
+.shutter::before{content:"";display:block;width:100%;height:100%;border-radius:50%;background:var(--cam-ink)}
+.stack{width:34px;height:42px;background:var(--paper);border-radius:3px;position:relative}
+.stack em{position:absolute;top:-7px;right:-7px;background:var(--accent);color:var(--on-accent);font-style:normal;font-weight:700;font-size:9.5px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center}
+.round{width:34px;height:34px;border-radius:50%;border:1px solid var(--cam-ink);display:grid;place-items:center;font-size:8.5px}
+.bar4{flex:none;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:10px 14px 18px;font-size:10px}
+.btn{background:var(--accent);color:var(--on-accent);font-weight:600;padding:8px 12px;border-radius:9px;font-size:11px;text-align:center;white-space:nowrap}
+.btn.ghost{background:transparent;color:var(--app-ink);border:1px solid var(--app-rule)}
+.page{flex:1;min-height:0;margin:0 12px;padding:16px 14px;display:flex;flex-direction:column;gap:6px}
+.page b{color:#14202b;font-family:var(--display);font-size:13px}
+.page u{display:block;text-decoration:none;height:4px;border-radius:2px;background:var(--paper-line)}
+.page u.h{background:var(--hl);height:8px}
+.filters{display:flex;gap:7px;padding:2px 0;flex:none}
+.filters div{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;color:var(--app-muted)}
+.filters i{display:block;width:100%;height:42px;padding:6px 5px;border:2px solid transparent}
+.filters .on{color:var(--accent);font-weight:600}.filters .on i{border-color:var(--accent)}
+.f-orig{filter:sepia(.5) brightness(.85)}.f-bw{filter:contrast(2.2) grayscale(1)}.f-gray{filter:grayscale(1) brightness(.93)}.f-light{filter:brightness(1.08)}
+.bsheet{flex:none;background:var(--app-surface);border-radius:16px 16px 0 0;padding:12px 14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 -2px 12px rgba(0,0,0,.15)}
+.bsheet .t{display:flex;justify-content:space-between;font-weight:600;font-size:11.5px}
+.bsheet .t small{font-family:var(--mono);font-weight:400;color:var(--app-muted);font-size:9px}
+.ocr{font-family:var(--mono);font-size:9.5px;background:var(--app-bg);border-radius:8px;padding:8px;line-height:1.5}
+.row{display:flex;gap:6px}.row>*{flex:1}
+.field{display:flex;flex-direction:column;gap:3px}
+.field small{color:var(--app-muted);font-size:9.5px}
+.field div{background:var(--app-surface);border:1px solid var(--app-rule);border-radius:9px;padding:7px 10px}
+.seg{display:flex;border:1px solid var(--app-rule);border-radius:9px;overflow:hidden;background:var(--app-surface)}
+.seg span{flex:1;text-align:center;padding:6px 0}
+.seg .on{background:var(--accent);color:var(--on-accent);font-weight:600}
+.sw{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.sw i{width:28px;height:16px;border-radius:99px;background:var(--accent);position:relative;flex:none}
+.sw i::after{content:"";position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:var(--on-accent)}
+.dest{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;font-size:9px;color:var(--app-muted)}
+.dest i{display:block;height:34px;border-radius:9px;background:var(--app-surface);border:1px solid var(--app-rule);margin-bottom:3px}
+
+.personas{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.personas article{background:var(--surface);padding:20px;display:flex;flex-direction:column;gap:8px;font-size:15px;min-width:0}
+.personas dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:14px}
+.personas dt{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding-top:3px}
+.personas dd{margin:0}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:32px;padding-block:24px 56px}
+  nav.toc{position:static}
+  nav.toc ol{flex-direction:row;flex-wrap:wrap;gap:4px 16px}
+  main{gap:56px}
+  .layer{grid-template-columns:minmax(0,1fr);gap:8px}
+}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Sommaire">
+  <p>Sommaire</p>
+  <ol>
+    <li><a href="#maquette"><b>A</b>Maquette</a></li>
+    <li><a href="#vision"><b>B</b>Vision</a></li>
+    <li><a href="#marche"><b>C</b>Concurrence</a></li>
+    <li><a href="#cibles"><b>D</b>Utilisateurs</a></li>
+    <li><a href="#fonctions"><b>E</b>Fonctionnalités</a></li>
+    <li><a href="#pipeline"><b>F</b>Traitement d'image</a></li>
+    <li><a href="#stack"><b>G</b>Architecture</a></li>
+    <li><a href="#donnees"><b>H</b>Données et RGPD</a></li>
+    <li><a href="#modele"><b>I</b>Monétisation</a></li>
+    <li><a href="#planning"><b>J</b>Planning</a></li>
+    <li><a href="#budget"><b>K</b>Charge et budget</a></li>
+    <li><a href="#qualite"><b>L</b>Qualité et KPI</a></li>
+    <li><a href="#risques"><b>M</b>Risques</a></li>
+    <li><a href="#lancement"><b>N</b>Lancement</a></li>
+    <li><a href="#suite"><b>O</b>Prochaines étapes</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">Étude de conception · application mobile de numérisation · novembre 2026</p>
+  <div class="crop"><i></i><i></i><i></i><i></i>
+    <h1>Feuillet, le scanner <mark>de poche</mark></h1>
+  </div>
+  <p class="lede">Une application iOS et Android qui transforme une photo de document en PDF net, lisible et interrogeable. Tout le traitement se fait sur le téléphone, sans compte obligatoire et sans filigrane.</p>
+  <dl class="facts">
+    <div><dt>Nom de travail</dt><dd>Feuillet</dd></div>
+    <div><dt>Plateformes</dt><dd>iOS 16+ et Android 8+</dd></div>
+    <div><dt>MVP</dt><dd>18 semaines</dd></div>
+    <div><dt>Charge estimée</dt><dd>≈ 120 jours-homme</dd></div>
+    <div><dt>Modèle</dt><dd>Gratuit + abonnement Pro</dd></div>
+  </dl>
+</header>
+
+<section id="maquette">
+  <h2><span class="let">A</span>Maquette des six écrans clés</h2>
+  <p>Le parcours principal tient en six écrans : retrouver un document, le capturer, le recadrer, l'améliorer, lire son texte, l'exporter. Le bouton de scan reste accessible au pouce depuis la bibliothèque.</p>
+  <div class="gallery">
+
+    <figure>
+      <div class="phone">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><b>Mes documents</b><small>Sélectionner</small></div>
+        <div class="body">
+          <div class="search">Rechercher dans le texte des scans</div>
+          <div class="chips"><span class="on">Tous</span><span>Factures</span><span>Contrats</span><span>Cours</span></div>
+          <div>
+            <div class="doc"><i class="sheet thumb"></i><div><b>Facture électricité, octobre</b><small>2 pages · 640 Ko · 12 nov.</small></div></div>
+            <div class="doc"><i class="sheet thumb"></i><div><b>Contrat de bail signé</b><small>6 pages · 2,1 Mo · 9 nov.</small></div></div>
+            <div class="doc"><i class="sheet thumb"></i><div><b>Algèbre, chapitre 4</b><small>12 pages · 3,8 Mo · 4 nov.</small></div></div>
+            <div class="doc"><i class="sheet thumb"></i><div><b>Carte d'identité recto verso</b><small>1 page · 410 Ko · 28 oct.</small></div></div>
+            <div class="doc"><i class="sheet thumb"></i><div><b>Note de frais taxi</b><small>1 page · 180 Ko · 21 oct.</small></div></div>
+          </div>
+        </div>
+        <div class="tab"><span class="on">Documents</span><span>Dossiers</span><span class="fab" aria-label="Scanner"></span><span>Outils</span><span>Réglages</span></div>
+      </div>
+      <figcaption><b>1. Bibliothèque</b>Liste triée par date, filtres par étiquette, recherche plein texte grâce à l'OCR.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone dark">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><small>Fermer</small><small>Flash auto · Grille</small></div>
+        <div class="view">
+          <svg viewBox="0 0 234 330" preserveAspectRatio="none" aria-hidden="true">
+            <polygon points="46,52 196,36 214,268 28,284" fill="var(--paper)"/>
+            <g stroke="var(--paper-line)" stroke-width="3" stroke-linecap="round">
+              <line x1="62" y1="80" x2="140" y2="72"/><line x1="60" y1="104" x2="188" y2="91"/><line x1="59" y1="122" x2="190" y2="109"/>
+              <line x1="57" y1="140" x2="192" y2="127"/><line x1="56" y1="158" x2="170" y2="147"/><line x1="54" y1="184" x2="196" y2="171"/>
+              <line x1="52" y1="202" x2="198" y2="189"/><line x1="50" y1="220" x2="150" y2="211"/><line x1="48" y1="250" x2="120" y2="244"/>
+            </g>
+            <polygon points="46,52 196,36 214,268 28,284" fill="var(--accent)" fill-opacity=".14" stroke="var(--accent)" stroke-width="2.5"/>
+            <g fill="var(--cam)" stroke="var(--accent)" stroke-width="2.5"><circle cx="46" cy="52" r="5"/><circle cx="196" cy="36" r="5"/><circle cx="214" cy="268" r="5"/><circle cx="28" cy="284" r="5"/></g>
+          </svg>
+          <span class="pill" style="bottom:10px">Document détecté, ne bougez plus</span>
+        </div>
+        <div class="modes"><span>Pièce d'identité</span><span class="on">Document</span><span>Livre</span><span>Tableau</span></div>
+        <div class="shoot"><span class="stack"><em>2</em></span><span class="shutter"></span><span class="round">Auto</span></div>
+      </div>
+      <figcaption><b>2. Capture</b>Les bords sont détectés en direct. La photo part seule dès que le cadre est stable. Le compteur montre les pages déjà prises.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone dark">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><small>Reprendre</small><small>Page 3 sur 3</small></div>
+        <div class="view">
+          <svg viewBox="0 0 234 350" preserveAspectRatio="none" aria-hidden="true">
+            <polygon points="40,70 190,52 208,296 24,312" fill="var(--paper)"/>
+            <g stroke="var(--paper-line)" stroke-width="3" stroke-linecap="round">
+              <line x1="56" y1="100" x2="134" y2="91"/><line x1="54" y1="126" x2="182" y2="112"/><line x1="52" y1="146" x2="184" y2="132"/>
+              <line x1="50" y1="166" x2="164" y2="154"/><line x1="48" y1="196" x2="190" y2="181"/><line x1="46" y1="216" x2="192" y2="201"/><line x1="44" y1="246" x2="130" y2="237"/>
+            </g>
+            <polygon points="40,70 190,52 208,296 24,312" fill="none" stroke="var(--accent)" stroke-width="2"/>
+            <g fill="var(--accent)"><rect x="107" y="56" width="16" height="6" rx="3"/><rect x="108" y="301" width="16" height="6" rx="3"/><rect x="28" y="183" width="6" height="16" rx="3"/><rect x="196" y="166" width="6" height="16" rx="3"/></g>
+            <g fill="var(--cam-ink)" stroke="var(--accent)" stroke-width="3"><circle cx="40" cy="70" r="7"/><circle cx="190" cy="52" r="9"/><circle cx="208" cy="296" r="7"/><circle cx="24" cy="312" r="7"/></g>
+            <g>
+              <circle cx="60" cy="38" r="30" fill="var(--cam)" stroke="var(--cam-ink)" stroke-width="2"/>
+              <path d="M60 8 A30 30 0 0 1 90 38 L60 38 Z" fill="var(--cam)"/>
+              <path d="M34 52 L60 38 L78 62 A30 30 0 0 1 34 52 Z" fill="var(--paper)"/>
+              <path d="M34 52 L60 38 L78 62" fill="none" stroke="var(--accent)" stroke-width="2"/>
+              <path d="M54 38 H66 M60 32 V44" stroke="var(--hl)" stroke-width="1.5"/>
+            </g>
+          </svg>
+        </div>
+        <div class="bar4"><span>Pivoter</span><span>Détection auto</span><span>Page entière</span><span class="btn">Suivant</span></div>
+      </div>
+      <figcaption><b>3. Recadrage</b>Quatre coins et quatre bords déplaçables. Une loupe apparaît sous le doigt pour viser le coin au pixel près.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><small>Retour</small><small>Page 3 sur 3</small></div>
+        <div class="page sheet" style="background:var(--paper)">
+          <b>FACTURE N° 2026-1047</b><u style="width:45%"></u><u style="width:30%"></u>
+          <span style="height:10px"></span><u></u><u style="width:92%"></u><u style="width:96%"></u><u style="width:60%"></u>
+          <span style="height:10px"></span><u></u><u style="width:88%"></u><u style="width:94%"></u><u style="width:40%"></u>
+          <span style="height:10px"></span><u style="width:50%;align-self:flex-end"></u><u style="width:35%;align-self:flex-end"></u>
+        </div>
+        <div class="body" style="flex:none;padding-top:10px">
+          <div class="filters">
+            <div><i class="sheet f-orig"></i>Original</div>
+            <div class="on"><i class="sheet"></i>Auto</div>
+            <div><i class="sheet f-bw"></i>Noir et blanc</div>
+            <div><i class="sheet f-gray"></i>Gris</div>
+            <div><i class="sheet f-light"></i>Éclaircir</div>
+          </div>
+        </div>
+        <div class="bar4"><span class="btn ghost">+ Page</span><span>Signer</span><span>Annoter</span><span class="btn">Terminer (3)</span></div>
+      </div>
+      <figcaption><b>4. Amélioration</b>Le filtre Auto supprime les ombres et blanchit le papier. Les autres filtres s'appliquent en un geste, page par page ou à tout le document.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><small>Retour</small><small>Texte reconnu</small></div>
+        <div class="page sheet" style="background:var(--paper)">
+          <b style="background:var(--hl);align-self:flex-start;padding:0 3px">FACTURE N° 2026-1047</b><u class="h" style="width:45%"></u><u style="width:30%"></u>
+          <span style="height:8px"></span><u></u><u style="width:92%"></u><u style="width:60%"></u>
+          <span style="height:8px"></span><u class="h" style="width:50%;align-self:flex-end"></u>
+        </div>
+        <div class="bsheet">
+          <div class="t"><span>Texte extrait</span><small>FR · 98 % de confiance</small></div>
+          <div class="ocr">FACTURE N° 2026-1047<br>Date : 12/11/2026<br>Client : Atelier Rivière<br>Total TTC : 486,00</div>
+          <div class="row"><span class="btn">Copier</span><span class="btn ghost">Traduire</span><span class="btn ghost">.txt</span></div>
+        </div>
+      </div>
+      <figcaption><b>5. Texte (OCR)</b>Le texte reconnu est surligné sur la page. Il se copie, se traduit ou s'exporte. Il alimente aussi la recherche de la bibliothèque.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone">
+        <div class="st"><span>9:41</span><span>5G ▮▮▮</span></div>
+        <div class="hd"><b>Exporter</b><small>Annuler</small></div>
+        <div class="body">
+          <div class="field"><small>Nom du fichier</small><div>Facture-2026-1047.pdf</div></div>
+          <div class="field"><small>Format</small><div class="seg" style="padding:0;border-radius:9px"><span class="on">PDF</span><span>JPG</span><span>Word</span><span>TXT</span></div></div>
+          <div class="field"><small>Qualité</small><div class="seg" style="padding:0"><span>Légère</span><span class="on">Standard</span><span>Maximale</span></div></div>
+          <div class="sw"><span>PDF interrogeable (texte sélectionnable)</span><i></i></div>
+          <div class="sw"><span>Protéger par mot de passe</span><i style="background:var(--app-rule)"></i></div>
+          <div class="dest"><span><i></i>Partager</span><span><i></i>E-mail</span><span><i></i>Fichiers</span><span><i></i>Imprimer</span></div>
+        </div>
+        <div class="bar4" style="flex-direction:column;align-items:stretch"><span class="btn">Exporter 3 pages · 1,4 Mo</span></div>
+      </div>
+      <figcaption><b>6. Export</b>Format, poids et protection se règlent sur un seul écran. Le poids final est annoncé avant l'envoi.</figcaption>
+    </figure>
+  </div>
+  <p class="note">Maquette de principe en fil de fer haute fidélité. L'étape de design (section J) produit la version Figma complète avec les états vides, les erreurs et le mode sombre.</p>
+</section>
+
+<section id="vision">
+  <h2><span class="let">B</span>Vision et positionnement</h2>
+  <p>Les scanners mobiles dominants sont puissants mais chargés : compte imposé, publicité, filigrane sur les PDF gratuits, envoi des documents vers un serveur. Or on scanne surtout des papiers sensibles : pièces d'identité, contrats, bulletins de paie.</p>
+  <div class="callout">
+    <h3>Promesse</h3>
+    <p>Un scan net en moins de dix secondes, qui ne quitte jamais le téléphone tant que l'utilisateur ne l'a pas décidé.</p>
+  </div>
+  <div class="cols">
+    <div><span class="tag">Différence 1</span><h3>Traitement local</h3><p>Détection, filtres et OCR tournent sur l'appareil. L'application fonctionne en mode avion.</p></div>
+    <div><span class="tag">Différence 2</span><h3>Gratuit sans piège</h3><p>Scans illimités, PDF sans filigrane, aucune publicité. Le payant ajoute des fonctions, il ne débloque pas l'essentiel.</p></div>
+    <div><span class="tag">Différence 3</span><h3>Français et arabe</h3><p>Interface et OCR pensés pour les documents bilingues, avec la lecture de droite à gauche.</p></div>
+  </div>
+</section>
+
+<section id="marche">
+  <h2><span class="let">C</span>Concurrence</h2>
+  <p>Le marché est mûr et les usages sont installés. La place à prendre se situe sur la confiance et la simplicité plutôt que sur la liste de fonctions.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Application</th><th>Points forts</th><th>Points faibles</th><th>Ce qu'on en retient</th></tr></thead>
+    <tbody>
+      <tr><td><b>CamScanner</b></td><td>Très complète : OCR, retouche, cloud, outils PDF. Base installée énorme.</td><td>Filigrane et publicité en version gratuite. Confiance entamée en 2019 par un composant publicitaire malveillant sur Android.</td><td>La référence fonctionnelle. Ne pas la suivre sur la publicité.</td></tr>
+      <tr><td><b>Adobe Scan</b></td><td>OCR gratuit de bonne qualité, lien avec Acrobat.</td><td>Compte Adobe obligatoire. Les outils avancés renvoient vers un abonnement.</td><td>L'OCR gratuit est devenu la norme.</td></tr>
+      <tr><td><b>Genius Scan</b></td><td>Rapide, traitement local, pas de compte.</td><td>OCR et synchronisation réservés au payant.</td><td>Le concurrent le plus proche du positionnement visé.</td></tr>
+      <tr><td><b>Notes (iOS) et Google Drive</b></td><td>Déjà installés, gratuits.</td><td>Peu d'organisation, export limité, pas d'outils de retouche.</td><td>Le niveau minimum à dépasser nettement dès le premier scan.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Tableau qualitatif établi de mémoire. Les tarifs et les limites des offres gratuites changent souvent : à revérifier sur les stores pendant le cadrage, avec une étude de mots-clés ASO.</p>
+</section>
+
+<section id="cibles">
+  <h2><span class="let">D</span>Utilisateurs cibles</h2>
+  <div class="personas">
+    <article><h3>L'étudiante</h3><p>Scanne des cours, des livres de bibliothèque et des notes manuscrites.</p>
+      <dl><dt>Besoin</dt><dd>Enchaîner 20 pages vite, obtenir un PDF léger.</dd><dt>Frein</dt><dd>Aucun budget, méfiance envers les abonnements.</dd><dt>Offre</dt><dd>Gratuit.</dd></dl></article>
+    <article><h3>L'indépendant</h3><p>Garde ses factures, notes de frais et contrats signés.</p>
+      <dl><dt>Besoin</dt><dd>Retrouver un montant ou un nom par recherche, envoyer au comptable.</dd><dt>Frein</dt><dd>Perd du temps à renommer et classer.</dd><dt>Offre</dt><dd>Pro.</dd></dl></article>
+    <article><h3>Le particulier en démarche</h3><p>Dossier de location, visa, banque, assurance.</p>
+      <dl><dt>Besoin</dt><dd>Pièce d'identité recto verso sur une page, fichier sous la limite de poids du site.</dd><dt>Frein</dt><dd>Inquiet pour la confidentialité.</dd><dt>Offre</dt><dd>Gratuit, Pro ponctuel.</dd></dl></article>
+  </div>
+</section>
+
+<section id="fonctions">
+  <h2><span class="let">E</span>Fonctionnalités par version</h2>
+  <div class="cols">
+    <div><span class="tag">MVP · indispensable</span>
+      <ul><li>Capture avec détection automatique des bords</li><li>Recadrage manuel et correction de perspective</li><li>Filtres : auto, noir et blanc, gris, original</li><li>Documents multipages, réorganisation des pages</li><li>Bibliothèque locale, dossiers, renommage</li><li>Export PDF et JPG, partage système</li><li>OCR sur l'appareil et recherche plein texte</li><li>Import depuis la galerie</li></ul></div>
+    <div><span class="tag">V1 · trois mois après</span>
+      <ul><li>Abonnement Pro</li><li>PDF interrogeable et protégé par mot de passe</li><li>Mode pièce d'identité et mode livre</li><li>Signature manuscrite et annotations</li><li>Verrouillage par empreinte ou visage</li><li>Sauvegarde vers iCloud Drive, Google Drive</li><li>Compression avec poids cible</li></ul></div>
+    <div><span class="tag">V2 · selon les retours</span>
+      <ul><li>Synchronisation entre appareils</li><li>Export Word et Excel</li><li>Nommage et classement automatiques</li><li>Extraction de champs sur les factures</li><li>Traduction du texte reconnu</li><li>Outils PDF : fusion, découpe, formulaire</li><li>Version tablette et web</li></ul></div>
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2><span class="let">F</span>Traitement d'image</h2>
+  <p>C'est le cœur du produit. La qualité perçue dépend de sept étapes enchaînées en moins d'une seconde par page sur un téléphone de milieu de gamme.</p>
+  <ol class="pipe">
+    <li><b>1 · CAPTURE</b>Photo pleine résolution<span>Mise au point continue, détection de flou et de reflet avant le déclenchement.</span></li>
+    <li><b>2 · BORDS</b>Détection du quadrilatère<span>Niveaux de gris, flou gaussien, Canny, contours, approximation à quatre côtés.</span></li>
+    <li><b>3 · REDRESSEMENT</b>Correction de perspective<span>Homographie vers un rectangle au ratio estimé (A4 = 1:1,414).</span></li>
+    <li><b>4 · NETTOYAGE</b>Ombres et contraste<span>Estimation du fond, division, seuillage adaptatif pour le noir et blanc.</span></li>
+    <li><b>5 · OCR</b>Reconnaissance du texte<span>Blocs, lignes et positions, stockés pour la recherche.</span></li>
+    <li><b>6 · ASSEMBLAGE</b>Création du PDF<span>Image JPEG par page et calque de texte invisible.</span></li>
+    <li><b>7 · COMPRESSION</b>Poids maîtrisé<span>Cible standard : 150 à 250 Ko par page A4.</span></li>
+  </ol>
+  <p class="note">Repère de résolution : une page A4 (210 × 297 mm) à 300 ppp mesure 2480 × 3508 px. C'est la cible du mode Maximale, 200 ppp suffisent pour le mode Standard.</p>
+</section>
+
+<section id="stack">
+  <h2><span class="let">G</span>Architecture et choix techniques</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Option</th><th>Avantages</th><th>Limites</th><th>Avis</th></tr></thead>
+    <tbody>
+      <tr class="pick"><td><b>Flutter</b> + modules natifs</td><td>Un seul code pour iOS et Android, interface fluide, accès aux API natives de scan et d'OCR par plugins.</td><td>Le pipeline caméra sur mesure demande du code natif ou OpenCV via FFI.</td><td class="v-ok">Recommandé</td></tr>
+      <tr><td><b>React Native</b></td><td>Écosystème JavaScript, bonnes bibliothèques caméra (VisionCamera).</td><td>Traitement d'image en temps réel plus délicat à optimiser.</td><td class="v-warn">Possible si l'équipe vient du web</td></tr>
+      <tr><td><b>Natif</b> Swift + Kotlin</td><td>Performances et intégration maximales.</td><td>Deux bases de code, charge presque doublée.</td><td class="v-bad">Trop coûteux pour un MVP</td></tr>
+    </tbody>
+  </table></div>
+  <div class="arch">
+    <div class="layer"><b>Interface</b><div><span>Écrans Flutter</span><span>État : Riverpod</span><span>Navigation : go_router</span><span>Français, arabe (RTL), anglais</span></div></div>
+    <div class="layer"><b>Métier</b><div><span>Service de scan</span><span>Service documents</span><span>Service OCR</span><span>Service export PDF</span><span>Service abonnement</span></div></div>
+    <div class="layer"><b>Appareil</b><div><span>Caméra</span><span>ML Kit (Android)</span><span>VisionKit et Vision (iOS)</span><span>OpenCV</span><span>SQLite + index plein texte FTS5</span><span>Fichiers chiffrés</span></div></div>
+    <div class="layer opt"><b>Cloud · V1+</b><div><span>RevenueCat (abonnements)</span><span>Supabase : comptes, stockage, synchronisation</span><span>Rapports de plantage</span></div></div>
+  </div>
+  <div class="callout">
+    <h3>Décision à prendre tôt : composant de scan natif ou caméra sur mesure</h3>
+    <p>Android (ML Kit Document Scanner) et iOS (VisionKit) fournissent un scanner complet, gratuit et local : capture, bords, recadrage, filtres. L'utiliser permet de livrer le MVP plus vite, mais les écrans 2 et 3 auront alors l'apparence du système.</p>
+    <p>Recommandation : démarrer avec ces composants pour valider le produit, puis passer à la caméra sur mesure de la maquette en V1, quand le pipeline OpenCV est au niveau.</p>
+  </div>
+  <p class="note">Point de vigilance OCR : la reconnaissance de texte locale de ML Kit couvre l'alphabet latin mais pas l'arabe, à ma connaissance. Sur iOS, Vision le gère. Sur Android il faudra tester Tesseract (local) ou un OCR cloud en option explicite. À confirmer par un prototype la première semaine.</p>
+</section>
+
+<section id="donnees">
+  <h2><span class="let">H</span>Données, sécurité et RGPD</h2>
+  <div class="cols">
+    <div><h3>Modèle de données</h3>
+      <ul><li><code>Document</code> : titre, dates, dossier, étiquettes, nombre de pages</li><li><code>Page</code> : image originale, image traitée, coins, filtre, ordre</li><li><code>TexteOCR</code> : texte, langue, positions des lignes</li><li><code>Dossier</code> et <code>Etiquette</code></li></ul>
+      <p class="note">L'image originale est conservée pour pouvoir recadrer ou changer de filtre plus tard.</p></div>
+    <div><h3>Sécurité</h3>
+      <ul><li>Fichiers dans le bac à sable de l'application, chiffrés au repos</li><li>Verrouillage biométrique optionnel</li><li>Aucun kit publicitaire ni traceur tiers</li><li>Exclusion possible des sauvegardes système</li><li>Mots de passe PDF en AES-256</li></ul></div>
+    <div><h3>Conformité</h3>
+      <ul><li>Aucune donnée personnelle collectée en version gratuite</li><li>Politique de confidentialité courte et lisible</li><li>Étiquettes de confidentialité App Store et section Sécurité des données de Google Play</li><li>En V2 : hébergement en Europe, suppression du compte dans l'application</li></ul></div>
+  </div>
+</section>
+
+<section id="modele">
+  <h2><span class="let">I</span>Monétisation</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Fonction</th><th>Gratuit</th><th>Pro</th></tr></thead>
+    <tbody>
+      <tr><td>Scans, pages et exports PDF sans filigrane</td><td>Illimités</td><td>Illimités</td></tr>
+      <tr><td>OCR et recherche</td><td>Inclus</td><td>Inclus, par lots</td></tr>
+      <tr><td>PDF interrogeable, mot de passe, poids cible</td><td>Non</td><td>Oui</td></tr>
+      <tr><td>Signature, annotations, mode livre</td><td>Non</td><td>Oui</td></tr>
+      <tr><td>Sauvegarde cloud et synchronisation</td><td>Non</td><td>Oui</td></tr>
+      <tr><td>Export Word et Excel</td><td>Non</td><td>Oui</td></tr>
+    </tbody>
+  </table></div>
+  <p>Hypothèse de prix à tester : 3,99 € par mois, 24,99 € par an, et un achat unique à 49,99 € pour ceux qui refusent l'abonnement. Essai gratuit de sept jours sur l'offre annuelle.</p>
+  <p class="note">Apple et Google prélèvent 15 % sur les abonnements des petits éditeurs (moins d'un million de dollars de revenus annuels), 30 % au-delà. Les prix sont des hypothèses de départ, à ajuster par pays et par test.</p>
+</section>
+
+<section id="planning">
+  <h2><span class="let">J</span>Planning sur 18 semaines</h2>
+  <div class="gantt"><div class="gantt-in">
+    <span></span>
+    <span class="wk">1</span><span class="wk">2</span><span class="wk">3</span><span class="wk">4</span><span class="wk">5</span><span class="wk">6</span><span class="wk">7</span><span class="wk">8</span><span class="wk">9</span><span class="wk">10</span><span class="wk">11</span><span class="wk">12</span><span class="wk">13</span><span class="wk">14</span><span class="wk">15</span><span class="wk">16</span><span class="wk">17</span><span class="wk">18</span>
+    <span class="lab">Cadrage</span><span class="bar" style="grid-column:2 / 4">Prototype OCR</span>
+    <span class="lab">Design UX/UI</span><span class="bar alt" style="grid-column:3 / 7">Figma, tests à 5 personnes</span>
+    <span class="lab">Scan et bibliothèque</span><span class="bar" style="grid-column:5 / 12">Capture, recadrage, filtres, stockage</span>
+    <span class="lab">OCR et export</span><span class="bar alt" style="grid-column:10 / 15">PDF, recherche, partage</span>
+    <span class="lab">Bêta fermée</span><span class="bar" style="grid-column:14 / 18">TestFlight, test interne Play</span>
+    <span class="lab">Publication</span><span class="bar alt" style="grid-column:17 / 20">Fiches, validation</span>
+  </div></div>
+  <ul class="plain">
+    <li><b>Fin de semaine 2 :</b> décision sur l'OCR arabe et sur le composant de scan.</li>
+    <li><b>Fin de semaine 6 :</b> maquette validée par cinq tests utilisateurs.</li>
+    <li><b>Fin de semaine 13 :</b> MVP complet, gel des fonctionnalités.</li>
+    <li><b>Semaine 18 :</b> mise en ligne dans un premier pays, puis ouverture progressive.</li>
+  </ul>
+</section>
+
+<section id="budget">
+  <h2><span class="let">K</span>Charge et budget</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Lot</th><th>Contenu</th><th class="num">Jours-homme</th></tr></thead>
+    <tbody>
+      <tr><td>Cadrage</td><td>Étude concurrente, prototype technique, spécification</td><td class="num">6</td></tr>
+      <tr><td>Design</td><td>Parcours, maquettes, identité, icône, tests</td><td class="num">15</td></tr>
+      <tr><td>Capture et recadrage</td><td>Caméra, détection, correction de perspective</td><td class="num">20</td></tr>
+      <tr><td>Filtres et qualité d'image</td><td>Ombres, noir et blanc, compression</td><td class="num">14</td></tr>
+      <tr><td>Bibliothèque</td><td>Base locale, dossiers, recherche, import</td><td class="num">16</td></tr>
+      <tr><td>OCR</td><td>Intégration, index plein texte, écran texte</td><td class="num">12</td></tr>
+      <tr><td>Export</td><td>PDF multipage, JPG, partage</td><td class="num">10</td></tr>
+      <tr><td>Tests et bêta</td><td>Jeu de documents de test, appareils, corrections</td><td class="num">18</td></tr>
+      <tr><td>Publication</td><td>Fiches stores, captures, conformité</td><td class="num">7</td></tr>
+      <tr><td><b>Total MVP</b></td><td></td><td class="num"><b>118</b></td></tr>
+    </tbody>
+  </table></div>
+  <div class="cols">
+    <div><h3>Équipe type</h3><p>Deux développeurs Flutter dont un à l'aise en natif, un designer à mi-temps pendant six semaines, un testeur en fin de projet. Un développeur seul expérimenté y arrive en six à sept mois.</p></div>
+    <div><h3>Ordre de grandeur</h3><p>À 300–500 € par jour, le MVP représente 35 000 à 60 000 € en prestation. Le coût tombe à presque zéro si vous développez vous-même.</p></div>
+    <div><h3>Frais fixes</h3><p>Compte Apple Developer : 99 $ par an. Compte Google Play : 25 $ une fois. Nom de domaine et site vitrine. Les services cloud prévus ont une offre gratuite suffisante au démarrage.</p></div>
+  </div>
+  <p class="note">Estimations de charge fondées sur un périmètre MVP strict, avec les composants de scan natifs. La caméra sur mesure ajoute 15 à 25 jours.</p>
+</section>
+
+<section id="qualite">
+  <h2><span class="let">L</span>Qualité et indicateurs</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Indicateur</th><th>Cible au lancement</th><th>Mesure</th></tr></thead>
+    <tbody>
+      <tr><td>Bords détectés sans correction manuelle</td><td class="mono">≥ 90 %</td><td>Jeu de 200 photos : fonds clairs et sombres, ombres, papier froissé</td></tr>
+      <tr><td>Traitement d'une page</td><td class="mono">&lt; 1 s</td><td>Téléphone Android de milieu de gamme de trois ans</td></tr>
+      <tr><td>OCR d'une page A4</td><td class="mono">&lt; 2 s</td><td>Même appareil</td></tr>
+      <tr><td>Sessions sans plantage</td><td class="mono">≥ 99,5 %</td><td>Rapports de plantage</td></tr>
+      <tr><td>Premier scan exporté dès la première session</td><td class="mono">≥ 60 %</td><td>Mesure anonyme, avec consentement</td></tr>
+      <tr><td>Rétention à 7 jours</td><td class="mono">≥ 25 %</td><td>Idem</td></tr>
+      <tr><td>Passage au Pro (après la V1)</td><td class="mono">2 à 4 %</td><td>RevenueCat</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Les cibles sont des hypothèses de travail à recaler après la bêta.</p>
+</section>
+
+<section id="risques">
+  <h2><span class="let">M</span>Risques</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Risque</th><th>Gravité</th><th>Parade</th></tr></thead>
+    <tbody>
+      <tr><td>Marché saturé, difficulté à émerger sur les stores</td><td class="v-bad">Forte</td><td>Positionnement confidentialité, niche bilingue français-arabe, ASO par pays</td></tr>
+      <tr><td>OCR arabe insuffisant sur Android</td><td class="v-warn">Moyenne</td><td>Prototype en semaine 1, solution de repli cloud sur accord explicite</td></tr>
+      <tr><td>Qualité de scan en dessous des leaders en faible lumière</td><td class="v-warn">Moyenne</td><td>Composants natifs au départ, jeu de test dès le début</td></tr>
+      <tr><td>Gratuit trop généreux, revenus faibles</td><td class="v-warn">Moyenne</td><td>Fonctions Pro orientées usage professionnel, tests de prix</td></tr>
+      <tr><td>Refus de validation par un store</td><td class="v-ok">Faible</td><td>Textes d'autorisation caméra et photos soignés, politique de confidentialité en ligne</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="lancement">
+  <h2><span class="let">N</span>Lancement</h2>
+  <ul class="plain">
+    <li><b>Fiche store :</b> titre avec les mots « scanner » et « PDF », cinq captures qui reprennent le parcours de la maquette, vidéo de quinze secondes.</li>
+    <li><b>Ouverture progressive :</b> un pays francophone d'abord pour corriger sans abîmer la note, puis les autres.</li>
+    <li><b>Avis :</b> demande de note après le troisième export réussi, jamais avant.</li>
+    <li><b>Contenu :</b> pages web pratiques (« scanner une carte d'identité recto verso », « réduire le poids d'un PDF ») qui renvoient vers l'application.</li>
+    <li><b>Communautés :</b> groupes d'étudiants et d'indépendants, où le gratuit sans filigrane est un argument direct.</li>
+  </ul>
+</section>
+
+<section id="suite">
+  <h2><span class="let">O</span>Prochaines étapes</h2>
+  <ol class="plain">
+    <li>Valider le nom, le périmètre du MVP et le choix Flutter.</li>
+    <li>Monter le projet dans le dépôt : structure, navigation, thème, écran Bibliothèque.</li>
+    <li>Prototyper en une semaine le scan natif et l'OCR français et arabe sur un téléphone réel.</li>
+    <li>Constituer le jeu de 200 photos de test.</li>
+    <li>Passer la maquette en Figma et la tester auprès de cinq personnes.</li>
+  </ol>
+</section>
+</main>
+</div>
