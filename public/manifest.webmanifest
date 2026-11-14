@@ -1,0 +1,11 @@
+{
+  "name": "Feuillet",
+  "short_name": "Feuillet",
+  "description": "Scanner de documents de poche",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#edf0f3",
+  "theme_color": "#0a726d",
+  "lang": "fr",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
