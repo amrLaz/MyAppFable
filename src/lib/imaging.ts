@@ -65,6 +65,53 @@ function grayAt(source: CanvasImageSource, sw: number, sh: number, side: number)
   return { g, w, h };
 }
 
+/**
+ * Carte « à quel point ce pixel diffère du fond », réduite à `side` pixels.
+ * La couleur du fond est estimée sur le pourtour de l'image. Travailler sur cet écart
+ * plutôt que sur la luminosité permet de garder d'un seul tenant une feuille qui
+ * contient des aplats de couleur ou des zones sombres, et de traiter aussi une
+ * feuille sombre sur fond clair.
+ */
+function featureAt(source: CanvasImageSource, sw: number, sh: number, side: number) {
+  const s = side / Math.max(sw, sh);
+  const w = Math.max(8, Math.round(sw * s));
+  const h = Math.max(8, Math.round(sh * s));
+  const c = makeCanvas(w, h);
+  const ctx = ctx2d(c);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const strip = Math.max(2, Math.round(Math.min(w, h) * 0.02));
+  const median = (inStrip: (x: number, y: number) => boolean) => {
+    const ch: number[][] = [[], [], []];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!inStrip(x, y)) continue;
+      const i = (y * w + x) * 4;
+      ch[0].push(d[i]); ch[1].push(d[i + 1]); ch[2].push(d[i + 2]);
+    }
+    return ch.map((v) => v.sort((a, b) => a - b)[v.length >> 1]);
+  };
+  let bgs = [
+    median((_, y) => y < strip), median((_, y) => y >= h - strip),
+    median((x) => x < strip), median((x) => x >= w - strip),
+  ];
+  // Un côté dont la couleur ne ressemble à aucun autre est sans doute recouvert par la feuille : on l'ignore.
+  const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const agreeing = bgs.filter((a, i) => bgs.some((b, j) => i !== j && dist(a, b) < 70));
+  if (agreeing.length) bgs = agreeing;
+  const g = new Uint8Array(w * h);
+  for (let p = 0, i = 0; p < g.length; p++, i += 4) {
+    let best = Infinity;
+    for (const bg of bgs) {
+      const dr = d[i] - bg[0], dg = d[i + 1] - bg[1], db = d[i + 2] - bg[2];
+      const v = dr * dr + dg * dg + db * db;
+      if (v < best) best = v;
+    }
+    g[p] = Math.min(255, Math.sqrt(best) * 0.75);
+  }
+  return { g, w, h };
+}
+
 function box3(src: Uint8Array, w: number, h: number): Uint8Array {
   const out = new Uint8Array(src.length);
   for (let y = 0; y < h; y++) {
@@ -227,42 +274,177 @@ function dominantQuad(pts: Pt[], size: number): Pt[] | null {
 }
 
 /**
- * Affine chaque côté sur une image plus fine : le long du côté, on cherche de part
- * et d'autre le plus fort passage clair → sombre, puis on ajuste une droite sur ces points.
+ * Deux seuils sur la carte d'écart au fond :
+ * - `thr`, calé sur les valeurs du pourtour : au-dessus, ce n'est plus le fond ;
+ * - `high` (Otsu) : au-dessus, c'est franchement le document.
  */
-function refineQuad(quad: Pt[], g: Uint8Array, w: number, h: number): Pt[] {
+function thresholds(g: Uint8Array, w: number, h: number) {
+  const border: number[] = [];
+  const strip = Math.max(2, Math.round(Math.min(w, h) * 0.02));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (x < strip || x >= w - strip || y < strip || y >= h - strip) border.push(g[y * w + x]);
+  }
+  border.sort((p, q) => p - q);
+  const level = border[border.length >> 1];
+  const spread = border.map((v) => Math.abs(v - level)).sort((p, q) => p - q)[border.length >> 1];
+  const high = otsu(g);
+  return { thr: Math.min(high, Math.max(14, level + 4 * spread + 8)), high };
+}
+
+/** Propage depuis le pourtour de l'image à travers les pixels pour lesquels `pass` vaut 1. */
+function floodFromFrame(pass: Uint8Array, w: number, h: number): Uint8Array {
+  const n = w * h;
+  const out = new Uint8Array(n);
+  const q = new Int32Array(n);
+  let qn = 0;
+  const push = (i: number) => { if (!out[i] && pass[i]) { out[i] = 1; q[qn++] = i; } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (qn) {
+    const i = q[--qn];
+    const x = i % w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (i >= w) push(i - w);
+    if (i < n - w) push(i + w);
+  }
+  return out;
+}
+
+/**
+ * Silhouette pleine du document.
+ * 1. Le fond est ce qu'on atteint depuis le pourtour sans traverser de pixel « document » :
+ *    les zones sombres ou colorées de la feuille (bandeaux, photos, tableaux) restent dedans.
+ * 2. Un objet moyennement différent du fond qui touche le bord de l'image (tissu, autre
+ *    papier, main) est retiré lui aussi, sans entamer la feuille qu'il touche.
+ */
+function silhouette(g: Uint8Array, w: number, h: number, thr: number, high: number): Uint8Array {
+  const n = w * h;
+  const pass = new Uint8Array(n);
+  for (let i = 0; i < n; i++) pass[i] = g[i] <= thr ? 1 : 0;
+  const bg = floodFromFrame(pass, w, h);
+
+  const r = Math.max(1, Math.round(Math.max(w, h) / 120));
+  let nearBg: Uint8Array = bg;
+  for (let k = 0; k < r; k++) nearBg = morph(nearBg, w, h, false);
+  // « Faible » : ni fond ni franchement document. Le liseré flou autour de la feuille est faible
+  // lui aussi ; on l'exclut (il longe le fond) pour ne pas remonter par lui jusque dans la feuille.
+  const weak = new Uint8Array(n);
+  let any = 0;
+  for (let i = 0; i < n; i++) {
+    weak[i] = !bg[i] && g[i] < high ? 1 : 0;
+    pass[i] = weak[i] && !nearBg[i] ? 1 : 0;
+    any |= pass[i];
+  }
+  let removed: Uint8Array = any ? floodFromFrame(pass, w, h) : new Uint8Array(n);
+  if (any) {
+    for (let k = 0; k <= r + 1; k++) {
+      const grown = morph(removed, w, h, false);
+      for (let i = 0; i < n; i++) grown[i] &= weak[i];
+      removed = grown;
+    }
+  }
+  let sil: Uint8Array = new Uint8Array(n);
+  for (let i = 0; i < n; i++) sil[i] = bg[i] || removed[i] ? 0 : 1;
+  // Ouverture : détache ce qui ne tient à la feuille que par un trait fin (veines du bois, fils, reflets).
+  const o = r <= 2 ? r + 1 : Math.round(r * 0.6);
+  for (let k = 0; k < o; k++) sil = morph(sil, w, h, true);
+  for (let k = 0; k < o; k++) sil = morph(sil, w, h, false);
+  return sil;
+}
+
+/** Ne garde que la partie de la silhouette d'un seul tenant autour du point donné. */
+function keepComponent(sil: Uint8Array, w: number, h: number, cx: number, cy: number): Uint8Array | null {
+  let seed = -1;
+  const x0 = Math.round(cx), y0 = Math.round(cy), R = Math.round(Math.max(w, h) * 0.05);
+  for (let rad = 0; rad <= R && seed < 0; rad++) {
+    for (let dy = -rad; dy <= rad && seed < 0; dy++) for (let dx = -rad; dx <= rad; dx++) {
+      const x = x0 + dx, y = y0 + dy;
+      if (x >= 0 && y >= 0 && x < w && y < h && sil[y * w + x]) { seed = y * w + x; break; }
+    }
+  }
+  if (seed < 0) return null;
+  const out = new Uint8Array(w * h);
+  const q = new Int32Array(w * h);
+  let qn = 0;
+  const push = (i: number) => { if (!out[i] && sil[i]) { out[i] = 1; q[qn++] = i; } };
+  push(seed);
+  while (qn) {
+    const i = q[--qn];
+    const x = i % w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (i >= w) push(i - w);
+    if (i < w * h - w) push(i + w);
+  }
+  return out;
+}
+
+/**
+ * Position du bord de la feuille le long d'une normale, en partant de l'extérieur :
+ * le premier pixel de silhouette rencontré est le bord. On ne peut donc pas le confondre
+ * avec un cadre ou un trait imprimé à l'intérieur. La position est ensuite précisée au
+ * point où la valeur passe à mi-chemin entre le fond et la feuille.
+ * Renvoie NaN si aucun bord n'est trouvé.
+ */
+function outerEdge(sil: Uint8Array, g: Uint8Array, w: number, h: number,
+  px: number, py: number, nx: number, ny: number, reach: number): number {
+  const val = (d: number) => {
+    const x = Math.round(px + nx * d), y = Math.round(py + ny * d);
+    return x < 0 || y < 0 || x >= w || y >= h ? -1 : y * w + x;
+  };
+  let seenOutside = false;
+  for (let d = reach; d >= -reach; d--) {
+    const i = val(d);
+    if (i < 0) continue;
+    if (!sil[i]) { seenOutside = true; continue; }
+    if (!seenOutside) return NaN; // déjà dans la feuille au départ : objet collé ou coin mal placé
+    const iIn = val(d - 5), iOut = val(d + 3);
+    if (iIn < 0 || iOut < 0) return d;
+    const mid = (g[iIn] + g[iOut]) / 2;
+    let prev = g[iOut];
+    for (let e = d + 2; e >= d - 5; e--) {
+      const j = val(e);
+      if (j < 0) break;
+      if (g[j] >= mid) return prev < g[j] ? e + (g[j] - mid) / (g[j] - prev) : e;
+      prev = g[j];
+    }
+    return d;
+  }
+  return NaN;
+}
+
+interface Sil { sil: Uint8Array; g: Uint8Array; w: number; h: number }
+
+function outwardNormal(a: Pt, b: Pt, cx: number, cy: number) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+  let nx = -dir.y, ny = dir.x;
+  if (nx * ((a.x + b.x) / 2 - cx) + ny * ((a.y + b.y) / 2 - cy) < 0) { nx = -nx; ny = -ny; }
+  return { dir, nx, ny };
+}
+
+/** Affine chaque côté : relève le vrai bord en de nombreux points, puis y ajuste une droite. */
+function refineLines(quad: Pt[], s: Sil): Pt[] {
+  const { sil, g, w, h } = s;
   const cx = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4;
   const cy = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4;
-  const reach = Math.max(6, Math.round(Math.max(w, h) * 0.03));
-  const at = (x: number, y: number) => {
-    const xi = x < 0 ? 0 : x > w - 1 ? w - 1 : Math.round(x);
-    const yi = y < 0 ? 0 : y > h - 1 ? h - 1 : Math.round(y);
-    return g[yi * w + xi];
-  };
+  const reach = Math.max(6, Math.round(Math.max(w, h) * 0.035));
   const lines: { p: Pt; d: Pt }[] = [];
-  for (let s = 0; s < 4; s++) {
-    const a = quad[s], b = quad[(s + 1) % 4];
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
-    let nx = -dir.y, ny = dir.x;
-    if (nx * ((a.x + b.x) / 2 - cx) + ny * ((a.y + b.y) / 2 - cy) < 0) { nx = -nx; ny = -ny; }
+  for (let k = 0; k < 4; k++) {
+    const a = quad[k], b = quad[(k + 1) % 4];
+    const { dir, nx, ny } = outwardNormal(a, b, cx, cy);
     let pts: Pt[] = [];
-    const N = 48;
-    for (let k = 0; k < N; k++) {
-      const t = 0.08 + (0.84 * k) / (N - 1);
+    const N = 64;
+    for (let m = 0; m < N; m++) {
+      const t = 0.06 + (0.88 * m) / (N - 1);
       const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t;
-      let best = 10, bestD = NaN; // contraste minimal pour compter comme un bord
-      for (let d = -reach; d <= reach; d++) {
-        const inside = at(px + nx * (d - 2), py + ny * (d - 2)) + at(px + nx * (d - 3), py + ny * (d - 3));
-        const outside = at(px + nx * (d + 2), py + ny * (d + 2)) + at(px + nx * (d + 3), py + ny * (d + 3));
-        const grad = (inside - outside) / 2;
-        if (grad > best) { best = grad; bestD = d; }
-      }
-      if (!Number.isNaN(bestD)) pts.push({ x: px + nx * bestD, y: py + ny * bestD });
+      const d = outerEdge(sil, g, w, h, px, py, nx, ny, reach);
+      if (!Number.isNaN(d)) pts.push({ x: px + nx * d, y: py + ny * d });
     }
     let line = { p: a, d: dir };
-    // Ajustement par moindres carrés, en écartant deux fois les points aberrants.
-    for (let iter = 0; iter < 3 && pts.length >= 10; iter++) {
+    // Ajustement par moindres carrés, en écartant les points aberrants.
+    for (let iter = 0; iter < 3 && pts.length >= 12; iter++) {
       let mx = 0, my = 0;
       for (const q of pts) { mx += q.x; my += q.y; }
       mx /= pts.length; my /= pts.length;
@@ -285,27 +467,90 @@ function refineQuad(quad: Pt[], g: Uint8Array, w: number, h: number): Pt[] {
   });
 }
 
+/** Part du contour réellement posée sur les côtés du quadrilatère (le plus mauvais des quatre côtés). */
+function straightness(quad: Pt[], s: Sil): number {
+  const { sil, g, w, h } = s;
+  const cx = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4;
+  const cy = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4;
+  const reach = Math.round(Math.max(w, h) * 0.06);
+  const tol = Math.max(2, Math.max(w, h) * 0.004);
+  let worst = 1;
+  for (let k = 0; k < 4; k++) {
+    const a = quad[k], b = quad[(k + 1) % 4];
+    const { nx, ny } = outwardNormal(a, b, cx, cy);
+    let ok = 0;
+    const N = 48;
+    for (let m = 0; m < N; m++) {
+      const t = 0.1 + (0.8 * m) / (N - 1);
+      const d = outerEdge(sil, g, w, h, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, nx, ny, reach);
+      if (Math.abs(d) <= tol) ok++;
+    }
+    worst = Math.min(worst, ok / N);
+  }
+  return worst;
+}
+
+/** Les quatre sommets de l'enveloppe convexe qui forment le plus grand quadrilatère : les vrais coins d'une feuille pliée. */
+function maxAreaQuad(hull: Pt[]): Pt[] | null {
+  const v = hull.slice();
+  while (v.length > 30) {
+    let best = 0, bestA = Infinity;
+    for (let i = 0; i < v.length; i++) {
+      const a = Math.abs(cross(v[(i + v.length - 1) % v.length], v[i], v[(i + 1) % v.length]));
+      if (a < bestA) { bestA = a; best = i; }
+    }
+    v.splice(best, 1);
+  }
+  const n = v.length;
+  if (n < 4) return null;
+  let bestArea = 0, pick: Pt[] | null = null;
+  for (let i = 0; i < n - 3; i++) for (let j = i + 1; j < n - 2; j++) for (let k = j + 1; k < n - 1; k++) for (let l = k + 1; l < n; l++) {
+    const area = Math.abs(cross(v[i], v[j], v[k])) + Math.abs(cross(v[i], v[k], v[l]));
+    if (area > bestArea) { bestArea = area; pick = [v[i], v[j], v[k], v[l]]; }
+  }
+  return pick;
+}
+
+/** Recale chaque coin sur le point de la silhouette le plus éloigné du centre dans sa direction. */
+function snapCorners(quad: Pt[], s: Sil): Pt[] {
+  const { sil, w, h } = s;
+  const cx = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4;
+  const cy = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4;
+  const R = Math.round(Math.max(w, h) * 0.03);
+  return quad.map((c) => {
+    const len = Math.hypot(c.x - cx, c.y - cy) || 1;
+    const ux = (c.x - cx) / len, uy = (c.y - cy) / len;
+    let best = -Infinity, out = c;
+    for (let y = Math.max(0, Math.round(c.y) - R); y <= Math.min(h - 1, Math.round(c.y) + R); y++) {
+      for (let x = Math.max(0, Math.round(c.x) - R); x <= Math.min(w - 1, Math.round(c.x) + R); x++) {
+        if (!sil[y * w + x]) continue;
+        const score = (x - cx) * ux + (y - cy) * uy;
+        if (score > best) { best = score; out = { x: x + 0.5 + ux * 0.5, y: y + 0.5 + uy * 0.5 }; }
+      }
+    }
+    return out;
+  });
+}
+
 /**
  * Cherche la feuille dans l'image.
- * 1. Zone claire principale (seuil d'Otsu, nettoyage morphologique) sur une image réduite.
- * 2. Enveloppe convexe réduite à ses quatre côtés dominants.
- * 3. Si `precise`, chaque côté est recalé sur le vrai bord dans une image plus fine.
- * Renvoie null si rien de convaincant (fond aussi clair que la feuille, feuille hors cadre...).
+ * 1. Silhouette de ce qui se détache du fond, sur une image réduite.
+ * 2. Deux lectures de cette silhouette : les quatre droites dominantes de son contour
+ *    (feuille plate, même cornée) et ses quatre sommets extrêmes (feuille pliée, bords brisés).
+ * 3. Si `precise`, on recale le tout sur une image plus fine et on garde les droites
+ *    lorsque le contour les suit vraiment, sinon les sommets.
+ * Renvoie null si rien de convaincant (fond identique à la feuille, feuille hors cadre...).
  */
 export function detectQuad(source: CanvasImageSource, sw: number, sh: number, precise = true): Quad | null {
   if (!sw || !sh) return null;
-  const fine = precise ? grayAt(source, sw, sh, 960) : null;
-  const { g: raw, w, h } = grayAt(fine ? sourceFromGray(fine) : source, fine ? fine.w : sw, fine ? fine.h : sh, 240);
+  const fine = precise ? featureAt(source, sw, sh, 960) : null;
+  const { g: raw, w, h } = fine ? grayAt(sourceFromGray(fine), fine.w, fine.h, 240) : featureAt(source, sw, sh, 240);
   const g = box3(raw, w, h);
   const n = w * h;
-  const thr = otsu(g);
-  let mask: Uint8Array = new Uint8Array(n);
-  for (let i = 0; i < n; i++) mask[i] = g[i] > thr ? 1 : 0;
-  // Ouverture : coupe les ponts fins vers d'autres objets clairs et les reflets isolés.
-  mask = morph(morph(mask, w, h, true), w, h, true);
-  mask = morph(morph(mask, w, h, false), w, h, false);
+  const { thr, high } = thresholds(g, w, h);
+  const mask = silhouette(g, w, h, thr, high);
 
-  // Plus grande zone claire d'un seul tenant ; on retient ses extrémités ligne par ligne.
+  // Plus grande zone d'un seul tenant ; on retient ses extrémités ligne par ligne et colonne par colonne.
   const seen = new Uint8Array(n);
   const stack = new Int32Array(n);
   let bestCount = 0;
@@ -335,38 +580,55 @@ export function detectQuad(source: CanvasImageSource, sw: number, sh: number, pr
   }
   if (!bestRows || !bestCols || bestCount < n * 0.1) return null;
 
-  const border: Pt[] = [];
-  for (let y = 0; y < h; y++) {
-    if (bestRows[y * 2] < 0) continue;
-    // Bords des pixels (et non leurs centres) pour ne pas rogner la feuille d'un demi-pixel.
-    border.push({ x: bestRows[y * 2], y }, { x: bestRows[y * 2], y: y + 1 }, { x: bestRows[y * 2 + 1] + 1, y }, { x: bestRows[y * 2 + 1] + 1, y: y + 1 });
-  }
-  // Points du contour (centres des pixels de bord, décalés d'un demi-pixel vers l'extérieur).
+  const outline: Pt[] = [];
   const contour: Pt[] = [];
   for (let y = 0; y < h; y++) {
     if (bestRows[y * 2] < 0) continue;
-    contour.push({ x: bestRows[y * 2], y: y + 0.5 }, { x: bestRows[y * 2 + 1] + 1, y: y + 0.5 });
+    const x0 = bestRows[y * 2], x1 = bestRows[y * 2 + 1] + 1;
+    outline.push({ x: x0, y }, { x: x0, y: y + 1 }, { x: x1, y }, { x: x1, y: y + 1 });
+    contour.push({ x: x0, y: y + 0.5 }, { x: x1, y: y + 0.5 });
   }
   for (let x = 0; x < w; x++) {
     if (bestCols[x * 2] < 0) continue;
     contour.push({ x: x + 0.5, y: bestCols[x * 2] }, { x: x + 0.5, y: bestCols[x * 2 + 1] + 1 });
   }
+  const hull = convexHull(outline);
   const inFrame = (q: Pt[] | null) => !!q && q.every((p) => p.x > -w * 0.08 && p.x < w * 1.08 && p.y > -h * 0.08 && p.y < h * 1.08);
-  let quad = dominantQuad(contour, Math.min(w, h));
-  if (!inFrame(quad)) quad = reduceToQuad(convexHull(border));
+  const areaOf = (q: Pt[]) => {
+    let a = 0;
+    for (let i = 0; i < 4; i++) a += q[i].x * q[(i + 1) % 4].y - q[(i + 1) % 4].x * q[i].y;
+    return Math.abs(a) / 2;
+  };
+  // Le quadrilatère doit être rempli par la silhouette, et n'être ni minuscule ni égal au cadre entier.
+  const plausible = (q: Pt[] | null): q is Pt[] => {
+    if (!q || !inFrame(q)) return false;
+    const a = areaOf(q);
+    return a >= n * 0.08 && a <= n * 0.985 && bestCount / a >= 0.72 && bestCount / a <= 1.35;
+  };
+  let byLines = dominantQuad(contour, Math.min(w, h));
+  if (!plausible(byLines)) byLines = reduceToQuad(hull);
+  if (!plausible(byLines)) byLines = null;
+  let byCorners = maxAreaQuad(hull);
+  if (!plausible(byCorners)) byCorners = null;
+  let quad = byLines ?? byCorners;
   if (!quad) return null;
-
-  let area = 0;
-  for (let i = 0; i < 4; i++) area += quad[i].x * quad[(i + 1) % 4].y - quad[(i + 1) % 4].x * quad[i].y;
-  area = Math.abs(area) / 2;
-  // La zone claire doit remplir le quadrilatère, qui ne doit être ni minuscule ni égal au cadre entier.
-  if (area < n * 0.08 || area > n * 0.985 || bestCount / area < 0.72 || bestCount / area > 1.35) return null;
 
   let W = w, H = h;
   if (fine) {
     const k = fine.w / w;
-    quad = refineQuad(quad.map((p) => ({ x: p.x * k, y: p.y * k })), box3(fine.g, fine.w, fine.h), fine.w, fine.h);
     W = fine.w; H = fine.h;
+    const up = (q: Pt[]) => q.map((p) => ({ x: p.x * k, y: p.y * k }));
+    quad = up(quad);
+    const gf = box3(fine.g, W, H);
+    const t = thresholds(gf, W, H);
+    const cxq = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4, cyq = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4;
+    const sil = keepComponent(silhouette(gf, W, H, t.thr, t.high), W, H, cxq, cyq);
+    if (sil) {
+      const s: Sil = { sil, g: gf, w: W, h: H };
+      const lines = byLines ? refineLines(up(byLines), s) : null;
+      if (lines && (!byCorners || straightness(lines, s) >= 0.75)) quad = lines;
+      else if (byCorners) quad = snapCorners(up(byCorners), s);
+    }
   }
 
   // Ordre : haut-gauche, haut-droit, bas-droit, bas-gauche.
@@ -427,16 +689,13 @@ function solve(A: number[][], b: number[]): number[] {
  */
 function edgeCurves(src: HTMLCanvasElement, p: Pt[]) {
   const N = 64;
-  const { g: raw, w, h } = grayAt(src, src.width, src.height, 1000);
+  const { g: raw, w, h } = featureAt(src, src.width, src.height, 1000);
   const g = box3(raw, w, h);
+  const t = thresholds(g, w, h);
   const k = w / src.width;
   const cx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4, cy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4;
-  const reach = Math.round(Math.max(w, h) * 0.035);
-  const at = (x: number, y: number) => {
-    const xi = x < 0 ? 0 : x > w - 1 ? w - 1 : Math.round(x);
-    const yi = y < 0 ? 0 : y > h - 1 ? h - 1 : Math.round(y);
-    return g[yi * w + xi];
-  };
+  const sil = keepComponent(silhouette(g, w, h, t.thr, t.high), w, h, cx * k, cy * k) ?? new Uint8Array(w * h);
+  const reach = Math.round(Math.max(w, h) * 0.08);
   // Côtés dans l'ordre : haut (0→1), droite (1→2), bas (3→2), gauche (0→3).
   const sides: [number, number][] = [[0, 1], [1, 2], [3, 2], [0, 3]];
   return sides.map(([ia, ib]) => {
@@ -448,20 +707,12 @@ function edgeCurves(src: HTMLCanvasElement, p: Pt[]) {
     const ok = new Uint8Array(N + 1);
     let found = 0;
     for (let s = 2; s <= N - 2; s++) {
-      const t = s / N;
-      const px = (a.x + (b.x - a.x) * t) * k, py = (a.y + (b.y - a.y) * t) * k;
-      let best = 9, bestD = NaN;
-      for (let dd = -reach; dd <= reach; dd++) {
-        const inside = at(px + nx * (dd - 2), py + ny * (dd - 2)) + at(px + nx * (dd - 3), py + ny * (dd - 3));
-        const outside = at(px + nx * (dd + 2), py + ny * (dd + 2)) + at(px + nx * (dd + 3), py + ny * (dd + 3));
-        // À contraste égal, on préfère le bord le plus proche de la corde.
-        const grad = (inside - outside) / 2 - Math.abs(dd) * 0.15;
-        if (grad > best) { best = grad; bestD = dd; }
-      }
-      if (!Number.isNaN(bestD)) { dev[s] = bestD; ok[s] = 1; found++; }
+      const tt = s / N;
+      const d = outerEdge(sil, g, w, h, (a.x + (b.x - a.x) * tt) * k, (a.y + (b.y - a.y) * tt) * k, nx, ny, reach);
+      if (!Number.isNaN(d)) { dev[s] = d; ok[s] = 1; found++; }
     }
     const flat = { nx, ny, dev: new Float32Array(N + 1) };
-    if (found < N * 0.6) return flat;
+    if (found < N * 0.7) return flat;
     // Aux deux bouts, on prolonge la première et la dernière mesure : un coin posé un peu
     // à côté (bord courbe) est ainsi ramené sur la feuille. Les trous sont interpolés.
     let first = 2, lastOk = N - 2;
@@ -480,14 +731,16 @@ function edgeCurves(src: HTMLCanvasElement, p: Pt[]) {
       for (let m = -3; m <= 3; m++) win.push(dev[Math.min(N, Math.max(0, s + m))]);
       med[s] = win.sort((x, y) => x - y)[3];
     }
-    let max = 0;
+    let max = 0, rough = 0;
     for (let s = 0; s <= N; s++) {
       let sum = 0;
       for (let m = -2; m <= 2; m++) sum += med[Math.min(N, Math.max(0, s + m))];
       flat.dev[s] = sum / 5 / k;
-      max = Math.max(max, Math.abs(flat.dev[s] * k));
+      max = Math.max(max, Math.abs(sum / 5));
+      if (s > 0) rough += Math.abs(med[s] - med[s - 1]);
     }
-    if (max < 1.5) flat.dev.fill(0); // bord droit : pas de correction
+    // Bord droit : rien à corriger. Relevé en dents de scie : mesure peu fiable, on s'abstient.
+    if (max < 1.5 || rough / N > 1.2) flat.dev.fill(0);
     return flat;
   });
 }
